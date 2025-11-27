@@ -515,10 +515,19 @@ configure_system_hardening() {
     
     for service in "${SERVICES_TO_DISABLE[@]}"; do
         if systemctl is-enabled "$service" &>/dev/null; then
-            if confirm_action "Disable $service?"; then
-                sudo systemctl disable "$service"
-                sudo systemctl stop "$service"
-                log_message "Disabled service: $service"
+            if [ "$service" = "avahi-daemon" ]; then
+                print_color "$YELLOW" "Warning: Disabling avahi-daemon may break P2P applications and local network discovery"
+                if confirm_action "Disable $service?"; then
+                    sudo systemctl disable "$service"
+                    sudo systemctl stop "$service"
+                    log_message "Disabled service: $service"
+                fi
+            else
+                if confirm_action "Disable $service?"; then
+                    sudo systemctl disable "$service"
+                    sudo systemctl stop "$service"
+                    log_message "Disabled service: $service"
+                fi
             fi
         fi
     done
@@ -798,7 +807,20 @@ install_security_tools() {
     case $DISTRO in
         ubuntu|debian)
             sudo apt update
-            sudo apt install -y fail2ban rkhunter secure-delete tor bitwarden-cli
+            sudo apt install -y fail2ban rkhunter secure-delete tor
+            # Bitwarden CLI via snap (bw command)
+            if ! command -v bw &> /dev/null; then
+                if command -v snap &> /dev/null; then
+                    sudo snap install bw
+                    print_color "$GREEN" "  ✓ Bitwarden CLI installed via snap"
+                    log_message "Installed: Bitwarden CLI (snap)"
+                else
+                    print_color "$YELLOW" "  ⏭ Snap not available, skipping Bitwarden CLI"
+                    print_color "$CYAN" "  Install manually: sudo snap install bw"
+                fi
+            else
+                print_color "$YELLOW" "  ⏭ Bitwarden CLI already installed, skipping"
+            fi
             ;;
         fedora)
             sudo dnf install -y fail2ban rkhunter secure-delete tor
