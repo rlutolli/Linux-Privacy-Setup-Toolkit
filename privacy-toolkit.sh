@@ -515,19 +515,10 @@ configure_system_hardening() {
     
     for service in "${SERVICES_TO_DISABLE[@]}"; do
         if systemctl is-enabled "$service" &>/dev/null; then
-            if [ "$service" = "avahi-daemon" ]; then
-                print_color "$YELLOW" "Warning: Disabling avahi-daemon may break P2P applications and local network discovery"
-                if confirm_action "Disable $service?"; then
-                    sudo systemctl disable "$service"
-                    sudo systemctl stop "$service"
-                    log_message "Disabled service: $service"
-                fi
-            else
-                if confirm_action "Disable $service?"; then
-                    sudo systemctl disable "$service"
-                    sudo systemctl stop "$service"
-                    log_message "Disabled service: $service"
-                fi
+            if confirm_action "Disable $service?"; then
+                sudo systemctl disable "$service"
+                sudo systemctl stop "$service"
+                log_message "Disabled service: $service"
             fi
         fi
     done
@@ -786,81 +777,6 @@ install_common_apps() {
     print_color "$CYAN" "Note: Some applications may require a system restart or logout/login to appear in menus"
 }
 
-# Function to install Bitwarden CLI from GitHub releases
-install_bitwarden_from_github() {
-    print_color "$CYAN" "  Downloading Bitwarden CLI from GitHub..."
-    
-    # Ensure unzip is installed
-    if ! command -v unzip &> /dev/null; then
-        print_color "$CYAN" "  Installing unzip..."
-        case $DISTRO in
-            ubuntu|debian)
-                sudo apt install -y unzip
-                ;;
-            fedora)
-                sudo dnf install -y unzip
-                ;;
-            arch|manjaro)
-                sudo pacman -S --noconfirm unzip
-                ;;
-        esac
-    fi
-    
-    # Detect architecture
-    ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64)
-            BW_ARCH="amd64"
-            ;;
-        aarch64|arm64)
-            BW_ARCH="arm64"
-            ;;
-        armv7l|armhf)
-            BW_ARCH="armv7"
-            ;;
-        *)
-            print_color "$RED" "  ✗ Unsupported architecture: $ARCH"
-            print_color "$CYAN" "  Install Bitwarden CLI manually from: https://github.com/bitwarden/cli/releases"
-            return 1
-            ;;
-    esac
-    
-    # Get latest version
-    BW_VERSION=$(curl -s https://api.github.com/repos/bitwarden/cli/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/' | sed 's/v//')
-    
-    if [ -z "$BW_VERSION" ]; then
-        print_color "$YELLOW" "  ⏭ Could not determine latest version, skipping"
-        print_color "$CYAN" "  Install manually: https://github.com/bitwarden/cli/releases"
-        return 1
-    fi
-    
-    # Download and install
-    BW_URL="https://github.com/bitwarden/cli/releases/download/v${BW_VERSION}/bw-linux-${BW_ARCH}-${BW_VERSION}.zip"
-    TEMP_DIR=$(mktemp -d)
-    
-    if curl -fsSL "$BW_URL" -o "$TEMP_DIR/bw.zip"; then
-        cd "$TEMP_DIR"
-        if unzip -q bw.zip 2>/dev/null; then
-            sudo mv bw /usr/local/bin/bw
-            sudo chmod +x /usr/local/bin/bw
-            cd - > /dev/null
-            rm -rf "$TEMP_DIR"
-            print_color "$GREEN" "  ✓ Bitwarden CLI installed from GitHub (v${BW_VERSION})"
-            log_message "Installed: Bitwarden CLI (GitHub v${BW_VERSION})"
-            return 0
-        else
-            print_color "$RED" "  ✗ Failed to extract Bitwarden CLI"
-            rm -rf "$TEMP_DIR"
-            return 1
-        fi
-    else
-        print_color "$RED" "  ✗ Failed to download Bitwarden CLI"
-        print_color "$CYAN" "  Install manually: https://github.com/bitwarden/cli/releases"
-        rm -rf "$TEMP_DIR"
-        return 1
-    fi
-}
-
 # Function to install additional security tools
 install_security_tools() {
     print_color "$PURPLE" "=== Additional Security Tools ==="
@@ -882,25 +798,7 @@ install_security_tools() {
     case $DISTRO in
         ubuntu|debian)
             sudo apt update
-            sudo apt install -y fail2ban rkhunter secure-delete tor
-            # Bitwarden CLI installation (try snap first, then GitHub binary)
-            if ! command -v bw &> /dev/null; then
-                if command -v snap &> /dev/null; then
-                    print_color "$CYAN" "  Installing Bitwarden CLI via snap..."
-                    if sudo snap install bw 2>/dev/null; then
-                        print_color "$GREEN" "  ✓ Bitwarden CLI installed via snap"
-                        log_message "Installed: Bitwarden CLI (snap)"
-                    else
-                        print_color "$YELLOW" "  ⏭ Snap installation failed, trying GitHub binary..."
-                        install_bitwarden_from_github
-                    fi
-                else
-                    print_color "$YELLOW" "  ⏭ Snap not available (common on Linux Mint/Zorin), using GitHub binary..."
-                    install_bitwarden_from_github
-                fi
-            else
-                print_color "$YELLOW" "  ⏭ Bitwarden CLI already installed, skipping"
-            fi
+            sudo apt install -y fail2ban rkhunter secure-delete tor bitwarden-cli
             ;;
         fedora)
             sudo dnf install -y fail2ban rkhunter secure-delete tor

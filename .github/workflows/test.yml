@@ -100,7 +100,6 @@ jobs:
             "install_common_apps"
             "install_security_tools"
             "configure_auto_updates"
-            "configure_performance"
             "create_audit_script"
           )
           
