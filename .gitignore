@@ -1,0 +1,19 @@
+# Log files
+*.log
+/tmp/privacy_toolkit_*.log
+
+# Temporary files
+*.tmp
+*.bak
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
