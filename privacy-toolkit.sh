@@ -16,7 +16,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 SCRIPT_NAME="Privacy Setup Toolkit"
-VERSION="1.0.0"
+VERSION="1.1.0"
 
 # Logging
 LOG_FILE="/tmp/privacy_toolkit_$(date +%Y%m%d_%H%M%S).log"
@@ -701,6 +701,158 @@ install_common_apps() {
     print_color "$CYAN" "Note: Some applications may require a system restart or logout/login to appear in menus"
 }
 
+# Function to install additional security tools
+install_security_tools() {
+    print_color "$PURPLE" "=== Additional Security Tools ==="
+    print_color "$CYAN" ""
+    print_color "$CYAN" "This will install additional security and privacy tools:"
+    print_color "$YELLOW" "  • fail2ban (intrusion prevention)"
+    print_color "$YELLOW" "  • rkhunter (rootkit detection)"
+    print_color "$YELLOW" "  • secure-delete (secure file deletion)"
+    print_color "$YELLOW" "  • tor (anonymity network)"
+    print_color "$YELLOW" "  • bitwarden-cli (password manager CLI)"
+    print_color "$CYAN" ""
+    
+    if ! confirm_action "Install additional security tools?"; then
+        return 0
+    fi
+    
+    log_message "Installing additional security tools"
+    
+    case $DISTRO in
+        ubuntu|debian)
+            sudo apt update
+            sudo apt install -y fail2ban rkhunter secure-delete tor bitwarden-cli
+            ;;
+        fedora)
+            sudo dnf install -y fail2ban rkhunter secure-delete tor
+            # Bitwarden CLI via Flatpak
+            if ! flatpak list --app | grep -q "com.bitwarden.desktop"; then
+                flatpak install -y flathub com.bitwarden.desktop
+            fi
+            ;;
+        arch|manjaro)
+            sudo pacman -S --noconfirm fail2ban rkhunter secure-delete tor
+            # Bitwarden CLI via AUR or Flatpak
+            if command -v yay &> /dev/null; then
+                yay -S --noconfirm bitwarden-cli
+            elif command -v paru &> /dev/null; then
+                paru -S --noconfirm bitwarden-cli
+            else
+                flatpak install -y flathub com.bitwarden.desktop
+            fi
+            ;;
+    esac
+    
+    # Configure fail2ban
+    if command -v fail2ban-client &> /dev/null; then
+        sudo systemctl enable fail2ban
+        sudo systemctl start fail2ban
+        print_color "$GREEN" "  ✓ fail2ban installed and started"
+        log_message "Installed: fail2ban"
+    fi
+    
+    # Initialize rkhunter
+    if command -v rkhunter &> /dev/null; then
+        sudo rkhunter --update
+        sudo rkhunter --propupd
+        print_color "$GREEN" "  ✓ rkhunter installed and initialized"
+        print_color "$CYAN" "  Run 'sudo rkhunter --check' to scan your system"
+        log_message "Installed: rkhunter"
+    fi
+    
+    # Create secure delete alias
+    if command -v srm &> /dev/null; then
+        cat >> "$HOME/.bashrc" <<'EOF'
+
+# Secure delete alias
+alias sdel='srm -v'
+EOF
+        print_color "$GREEN" "  ✓ secure-delete installed"
+        print_color "$CYAN" "  Use 'sdel <file>' to securely delete files"
+        log_message "Installed: secure-delete"
+    fi
+    
+    print_color "$GREEN" "✓ Additional security tools installation complete"
+}
+
+# Function to install Tor Browser
+install_tor_browser() {
+    print_color "$PURPLE" "=== Tor Browser Installation ==="
+    print_color "$CYAN" ""
+    print_color "$CYAN" "Tor Browser provides anonymous browsing through the Tor network."
+    print_color "$YELLOW" "This will install Tor Browser via Flatpak for maximum privacy."
+    print_color "$CYAN" ""
+    
+    if ! confirm_action "Install Tor Browser?"; then
+        return 0
+    fi
+    
+    log_message "Installing Tor Browser"
+    
+    if ! command -v flatpak &> /dev/null; then
+        print_color "$YELLOW" "Flatpak not found. Installing..."
+        case $DISTRO in
+            ubuntu|debian)
+                sudo apt install -y flatpak
+                ;;
+            fedora)
+                sudo dnf install -y flatpak
+                ;;
+            arch|manjaro)
+                sudo pacman -S --noconfirm flatpak
+                ;;
+        esac
+        flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
+    fi
+    
+    if flatpak list --app | grep -q "com.github.micahflee.torbrowser-launcher"; then
+        print_color "$YELLOW" "  ⏭ Tor Browser already installed, skipping"
+    else
+        flatpak install -y flathub com.github.micahflee.torbrowser-launcher
+        print_color "$GREEN" "  ✓ Tor Browser installed"
+        log_message "Installed: Tor Browser"
+    fi
+    
+    print_color "$GREEN" "✓ Tor Browser installation complete"
+}
+
+# Function to configure automatic security updates
+configure_auto_updates() {
+    print_color "$PURPLE" "=== Automatic Security Updates ==="
+    print_color "$CYAN" ""
+    print_color "$CYAN" "This will configure automatic security updates to keep your system secure."
+    print_color "$YELLOW" "Only security updates will be installed automatically."
+    print_color "$CYAN" ""
+    
+    if ! confirm_action "Configure automatic security updates?"; then
+        return 0
+    fi
+    
+    log_message "Configuring automatic security updates"
+    
+    case $DISTRO in
+        ubuntu|debian)
+            sudo apt install -y unattended-upgrades
+            sudo dpkg-reconfigure -plow unattended-upgrades
+            print_color "$GREEN" "  ✓ Automatic security updates configured"
+            log_message "Configured: unattended-upgrades"
+            ;;
+        fedora)
+            sudo dnf install -y dnf-automatic
+            sudo systemctl enable --now dnf-automatic.timer
+            print_color "$GREEN" "  ✓ Automatic security updates configured"
+            log_message "Configured: dnf-automatic"
+            ;;
+        arch|manjaro)
+            print_color "$YELLOW" "  Arch-based systems: Consider using a pacman hook or systemd timer"
+            print_color "$CYAN" "  Manual updates recommended: sudo pacman -Syu"
+            ;;
+    esac
+    
+    print_color "$GREEN" "✓ Automatic security updates configured"
+}
+
 # Function to create privacy audit script
 create_audit_script() {
     print_color "$PURPLE" "=== Creating Privacy Audit Script ==="
@@ -784,6 +936,9 @@ show_summary() {
     print_color "$YELLOW" "• Application sandboxing with Firejail"
     print_color "$YELLOW" "• System hardening configurations"
     print_color "$YELLOW" "• Common applications (VS Code, Spotify, Zen Browser, etc.)"
+    print_color "$YELLOW" "• Additional security tools (fail2ban, rkhunter, secure-delete)"
+    print_color "$YELLOW" "• Tor Browser for anonymous browsing"
+    print_color "$YELLOW" "• Automatic security updates"
     print_color "$YELLOW" "• Privacy audit script"
     print_color "$CYAN" ""
     print_color "$CYAN" "Useful commands:"
@@ -842,6 +997,9 @@ main() {
     configure_sandboxing
     configure_system_hardening
     install_common_apps
+    install_security_tools
+    install_tor_browser
+    configure_auto_updates
     create_audit_script
     
     show_summary

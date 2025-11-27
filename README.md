@@ -11,6 +11,9 @@ A comprehensive privacy and security hardening script for Linux systems with aut
 - 🏖️ **Application Sandboxing** - Firejail for isolating applications
 - 🛡️ **System Hardening** - Kernel security parameters and service management
 - 📦 **Common Applications** - Auto-install VS Code, Spotify, Zen Browser, Brave, Discord, GitHub Desktop
+- 🔒 **Security Tools** - fail2ban, rkhunter, secure-delete, Bitwarden CLI
+- 🌐 **Tor Browser** - Anonymous browsing via Tor network
+- 🔄 **Auto Updates** - Automatic security updates configuration
 - 📊 **Privacy Audit** - Script to check your privacy configuration
 
 ## Requirements
@@ -20,6 +23,14 @@ A comprehensive privacy and security hardening script for Linux systems with aut
 - Internet connection
 
 ## Installation
+
+### Quick Install (One-liner)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rlutolli/Linux-Privacy-Setup-Toolkit/main/privacy-toolkit.sh | bash
+```
+
+### Manual Install
 
 1. Clone or download this repository
 2. Make the script executable:
@@ -42,7 +53,10 @@ The script will guide you through each step with detailed explanations:
 5. **Sandboxing** - Installs and configures Firejail for application isolation
 6. **System Hardening** - Applies kernel security parameters and optionally disables unnecessary services
 7. **Common Apps** - Installs VS Code, Spotify, Zen Browser, Brave, Discord, GitHub Desktop
-8. **Audit Script** - Creates a `privacy-audit` command to check your setup
+8. **Security Tools** - Installs fail2ban, rkhunter, secure-delete, Bitwarden CLI
+9. **Tor Browser** - Optional installation of Tor Browser for anonymous browsing
+10. **Auto Updates** - Configures automatic security updates
+11. **Audit Script** - Creates a `privacy-audit` command to check your setup
 
 ## Customizations
 
@@ -57,6 +71,9 @@ After running the script, you'll have access to:
 - `privacy-audit` - Check your privacy configuration
 - `strip-metadata <file>` - Remove metadata from files
 - `firejail <app>` - Run applications in a sandbox
+- `sdel <file>` - Securely delete files (overwrites before deletion)
+- `sudo rkhunter --check` - Scan for rootkits
+- `bw` - Bitwarden CLI for password management
 
 ## Notes
 
