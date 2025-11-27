@@ -491,9 +491,9 @@ configure_system_hardening() {
     print_color "$CYAN" ""
     print_color "$CYAN" "This will:"
     print_color "$YELLOW" "  • Apply kernel security parameters (network hardening, memory protection)"
-    print_color "$YELLOW" "  • Optionally disable services: bluetooth, cups (printing)"
+    print_color "$YELLOW" "  • Optionally disable services: bluetooth, cups (printing), avahi-daemon"
     print_color "$CYAN" ""
-    print_color "$GREEN" "Note: avahi-daemon will be kept enabled for P2P applications"
+    print_color "$YELLOW" "Note: You'll be prompted for each service. avahi-daemon warning will appear if you choose to disable it."
     print_color "$CYAN" ""
     print_color "$CYAN" "Kernel hardening includes:"
     print_color "$YELLOW" "  - Disable IP redirects and source routing"
@@ -515,10 +515,19 @@ configure_system_hardening() {
     
     for service in "${SERVICES_TO_DISABLE[@]}"; do
         if systemctl is-enabled "$service" &>/dev/null; then
-            if confirm_action "Disable $service?"; then
-                sudo systemctl disable "$service"
-                sudo systemctl stop "$service"
-                log_message "Disabled service: $service"
+            if [ "$service" = "avahi-daemon" ]; then
+                print_color "$YELLOW" "Warning: Disabling avahi-daemon may break P2P applications and local network discovery"
+                if confirm_action "Disable $service?"; then
+                    sudo systemctl disable "$service"
+                    sudo systemctl stop "$service"
+                    log_message "Disabled service: $service"
+                fi
+            else
+                if confirm_action "Disable $service?"; then
+                    sudo systemctl disable "$service"
+                    sudo systemctl stop "$service"
+                    log_message "Disabled service: $service"
+                fi
             fi
         fi
     done
@@ -559,26 +568,8 @@ EOF
     print_color "$GREEN" "✓ System hardening applied"
 }
 
-# Function to install common applications
-install_common_apps() {
-    print_color "$PURPLE" "=== Common Applications Installation ==="
-    print_color "$CYAN" ""
-    print_color "$CYAN" "This will install commonly used applications:"
-    print_color "$YELLOW" "  • Visual Studio Code (code editor)"
-    print_color "$YELLOW" "  • Spotify (music streaming)"
-    print_color "$YELLOW" "  • Zen Browser (privacy-focused browser)"
-    print_color "$YELLOW" "  • Brave Browser (privacy-focused browser)"
-    print_color "$YELLOW" "  • Discord (communication)"
-    print_color "$YELLOW" "  • GitHub Desktop (Git GUI)"
-    print_color "$CYAN" ""
-    
-    if ! confirm_action "Install common applications?"; then
-        return 0
-    fi
-    
-    log_message "Installing common applications"
-    
-    # Check if Flatpak is installed
+# Function to ensure Flatpak is installed
+ensure_flatpak() {
     if ! command -v flatpak &> /dev/null; then
         print_color "$YELLOW" "Flatpak not found. Installing Flatpak..."
         case $DISTRO in
@@ -597,107 +588,201 @@ install_common_apps() {
         flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
         print_color "$GREEN" "✓ Flatpak installed"
     fi
+}
+
+# Function to install application from Flatpak
+install_flatpak_app() {
+    local app_id=$1
+    local app_name=$2
     
-    # Flatpak applications
-    FLATPAK_APPS=(
-        "app.zen_browser.zen"           # Zen Browser
-        "com.brave.Browser"             # Brave Browser
-        "com.discordapp.Discord"        # Discord
-        "io.github.shiftey.Desktop"      # GitHub Desktop
-    )
-    
-    print_color "$CYAN" "Installing Flatpak applications..."
-    for app in "${FLATPAK_APPS[@]}"; do
-        if flatpak list --app | grep -q "$app"; then
-            print_color "$YELLOW" "  ⏭ $app already installed, skipping"
+    if flatpak list --app | grep -q "$app_id"; then
+        print_color "$YELLOW" "  ⏭ $app_name already installed, skipping"
+        return 0
+    else
+        print_color "$CYAN" "  Installing $app_name..."
+        if flatpak install -y flathub "$app_id" 2>/dev/null; then
+            print_color "$GREEN" "  ✓ Installed $app_name"
+            log_message "Installed: $app_name ($app_id)"
+            return 0
         else
-            print_color "$CYAN" "  Installing $app..."
-            if flatpak install -y flathub "$app" 2>/dev/null; then
-                print_color "$GREEN" "  ✓ Installed $app"
-                log_message "Installed: $app"
-            else
-                print_color "$RED" "  ✗ Failed to install $app"
-            fi
+            print_color "$RED" "  ✗ Failed to install $app_name"
+            return 1
         fi
+    fi
+}
+
+# Function to install common applications with selective menu
+install_common_apps() {
+    print_color "$PURPLE" "=== Application Installation ==="
+    print_color "$CYAN" ""
+    print_color "$CYAN" "Choose application categories to install:"
+    print_color "$CYAN" ""
+    print_color "$YELLOW" "  1) Default (Zen Browser and/or Brave Browser only)"
+    print_color "$YELLOW" "  2) Privacy (Zen Browser, Brave Browser, Tor Browser)"
+    print_color "$YELLOW" "  3) Development (VS Code, GitHub Desktop)"
+    print_color "$YELLOW" "  4) Communication (Equibop)"
+    print_color "$YELLOW" "  5) Media (Spotify)"
+    print_color "$YELLOW" "  6) Custom selection"
+    print_color "$CYAN" ""
+    
+    read -p "Enter your choice(s) separated by commas [1-6, default: 1]: " app_choices
+    app_choices=${app_choices:-1}
+    
+    log_message "User selected application categories: $app_choices"
+    
+    # Ensure Flatpak is installed
+    ensure_flatpak
+    
+    # Parse choices
+    IFS=',' read -ra CHOICES <<< "$app_choices"
+    
+    # Track what to install
+    INSTALL_ZEN=false
+    INSTALL_BRAVE=false
+    INSTALL_TOR=false
+    INSTALL_VSCODE=false
+    INSTALL_GITHUB=false
+    INSTALL_EQUIBOP=false
+    INSTALL_SPOTIFY=false
+    
+    for choice in "${CHOICES[@]}"; do
+        choice=$(echo "$choice" | xargs) # trim whitespace
+        case "$choice" in
+            1)
+                INSTALL_ZEN=true
+                INSTALL_BRAVE=true
+                ;;
+            2)
+                INSTALL_ZEN=true
+                INSTALL_BRAVE=true
+                INSTALL_TOR=true
+                ;;
+            3)
+                INSTALL_VSCODE=true
+                INSTALL_GITHUB=true
+                ;;
+            4)
+                INSTALL_EQUIBOP=true
+                ;;
+            5)
+                INSTALL_SPOTIFY=true
+                ;;
+            6)
+                # Custom selection
+                print_color "$CYAN" ""
+                print_color "$CYAN" "Custom selection - choose individual apps:"
+                read -p "Install Zen Browser? [y/N]: " -n 1 -r; echo
+                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_ZEN=true
+                read -p "Install Brave Browser? [y/N]: " -n 1 -r; echo
+                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_BRAVE=true
+                read -p "Install Tor Browser? [y/N]: " -n 1 -r; echo
+                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_TOR=true
+                read -p "Install VS Code? [y/N]: " -n 1 -r; echo
+                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_VSCODE=true
+                read -p "Install GitHub Desktop? [y/N]: " -n 1 -r; echo
+                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_GITHUB=true
+                read -p "Install Equibop? [y/N]: " -n 1 -r; echo
+                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_EQUIBOP=true
+                read -p "Install Spotify? [y/N]: " -n 1 -r; echo
+                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_SPOTIFY=true
+                ;;
+        esac
     done
     
-    # Install VS Code
-    print_color "$CYAN" "Installing Visual Studio Code..."
-    if command -v code &> /dev/null; then
-        print_color "$YELLOW" "  ⏭ VS Code already installed, skipping"
-    else
-        case $DISTRO in
-            ubuntu|debian)
-                # Install VS Code via official repository
-                if [ ! -f /etc/apt/sources.list.d/vscode.list ]; then
-                    wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/packages.microsoft.gpg
-                    sudo install -o root -g root -m 644 /tmp/packages.microsoft.gpg /etc/apt/trusted.gpg.d/
-                    sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/trusted.gpg.d/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
-                    sudo apt update
-                fi
-                sudo apt install -y code
-                print_color "$GREEN" "  ✓ Installed VS Code"
-                log_message "Installed: VS Code"
-                ;;
-            fedora)
-                sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
-                sudo sh -c 'echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo'
-                sudo dnf install -y code
-                print_color "$GREEN" "  ✓ Installed VS Code"
-                log_message "Installed: VS Code"
-                ;;
-            arch|manjaro)
-                # Use AUR helper if available, otherwise manual install
-                if command -v yay &> /dev/null; then
-                    yay -S --noconfirm visual-studio-code-bin
-                elif command -v paru &> /dev/null; then
-                    paru -S --noconfirm visual-studio-code-bin
-                else
-                    print_color "$YELLOW" "  Install yay or paru for AUR packages, or install code manually"
-                fi
-                ;;
-        esac
+    # Install selected browsers
+    if [ "$INSTALL_ZEN" = true ] || [ "$INSTALL_BRAVE" = true ]; then
+        print_color "$CYAN" "Installing browsers..."
+        [ "$INSTALL_ZEN" = true ] && install_flatpak_app "app.zen_browser.zen" "Zen Browser"
+        [ "$INSTALL_BRAVE" = true ] && install_flatpak_app "com.brave.Browser" "Brave Browser"
     fi
     
-    # Install Spotify
-    print_color "$CYAN" "Installing Spotify..."
-    if command -v spotify &> /dev/null; then
-        print_color "$YELLOW" "  ⏭ Spotify already installed, skipping"
-    else
-        case $DISTRO in
-            ubuntu|debian)
-                # Install Spotify via official repository
-                if [ ! -f /etc/apt/sources.list.d/spotify.list ]; then
-                    curl -sS https://download.spotify.com/debian/pubkey_6224F9941A8AA6D1.gpg | sudo gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/spotify.gpg
-                    echo "deb http://repository.spotify.com stable non-free" | sudo tee /etc/apt/sources.list.d/spotify.list
-                    sudo apt update
-                fi
-                sudo apt install -y spotify-client
-                print_color "$GREEN" "  ✓ Installed Spotify"
-                log_message "Installed: Spotify"
-                ;;
-            fedora)
-                # Spotify is available via Flatpak on Fedora
-                if ! flatpak list --app | grep -q "com.spotify.Client"; then
-                    flatpak install -y flathub com.spotify.Client
-                    print_color "$GREEN" "  ✓ Installed Spotify (Flatpak)"
-                    log_message "Installed: Spotify (Flatpak)"
-                fi
-                ;;
-            arch|manjaro)
-                # Install from AUR or use Flatpak
-                if command -v yay &> /dev/null; then
-                    yay -S --noconfirm spotify
-                elif command -v paru &> /dev/null; then
-                    paru -S --noconfirm spotify
-                else
-                    flatpak install -y flathub com.spotify.Client
-                fi
-                ;;
-        esac
+    # Install Tor Browser if selected
+    if [ "$INSTALL_TOR" = true ]; then
+        install_flatpak_app "com.github.micahflee.torbrowser-launcher" "Tor Browser"
     fi
     
-    print_color "$GREEN" "✓ Common applications installation complete"
+    # Install VS Code if selected
+    if [ "$INSTALL_VSCODE" = true ]; then
+        print_color "$CYAN" "Installing Visual Studio Code..."
+        if command -v code &> /dev/null; then
+            print_color "$YELLOW" "  ⏭ VS Code already installed, skipping"
+        else
+            case $DISTRO in
+                ubuntu|debian)
+                    if [ ! -f /etc/apt/sources.list.d/vscode.list ]; then
+                        wget -qO- https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor > /tmp/packages.microsoft.gpg
+                        sudo install -o root -g root -m 644 /tmp/packages.microsoft.gpg /etc/apt/trusted.gpg.d/
+                        sudo sh -c 'echo "deb [arch=amd64,arm64,armhf signed-by=/etc/apt/trusted.gpg.d/packages.microsoft.gpg] https://packages.microsoft.com/repos/code stable main" > /etc/apt/sources.list.d/vscode.list'
+                        sudo apt update
+                    fi
+                    sudo apt install -y code
+                    print_color "$GREEN" "  ✓ Installed VS Code"
+                    log_message "Installed: VS Code"
+                    ;;
+                fedora)
+                    sudo rpm --import https://packages.microsoft.com/keys/microsoft.asc
+                    sudo sh -c 'echo -e "[code]\nname=Visual Studio Code\nbaseurl=https://packages.microsoft.com/yumrepos/vscode\nenabled=1\ngpgcheck=1\ngpgkey=https://packages.microsoft.com/keys/microsoft.asc" > /etc/yum.repos.d/vscode.repo'
+                    sudo dnf install -y code
+                    print_color "$GREEN" "  ✓ Installed VS Code"
+                    log_message "Installed: VS Code"
+                    ;;
+                arch|manjaro)
+                    if command -v yay &> /dev/null; then
+                        yay -S --noconfirm visual-studio-code-bin
+                    elif command -v paru &> /dev/null; then
+                        paru -S --noconfirm visual-studio-code-bin
+                    else
+                        print_color "$YELLOW" "  Install yay or paru for AUR packages, or install code manually"
+                    fi
+                    ;;
+            esac
+        fi
+    fi
+    
+    # Install GitHub Desktop if selected
+    if [ "$INSTALL_GITHUB" = true ]; then
+        install_flatpak_app "io.github.shiftey.Desktop" "GitHub Desktop"
+    fi
+    
+    # Install Equibop if selected
+    if [ "$INSTALL_EQUIBOP" = true ]; then
+        install_flatpak_app "org.equicord.equibop" "Equibop"
+    fi
+    
+    # Install Spotify if selected
+    if [ "$INSTALL_SPOTIFY" = true ]; then
+        print_color "$CYAN" "Installing Spotify..."
+        if command -v spotify &> /dev/null; then
+            print_color "$YELLOW" "  ⏭ Spotify already installed, skipping"
+        else
+            case $DISTRO in
+                ubuntu|debian)
+                    if [ ! -f /etc/apt/sources.list.d/spotify.list ]; then
+                        curl -sS https://download.spotify.com/debian/pubkey_6224F9941A8AA6D1.gpg | sudo gpg --dearmor --yes -o /etc/apt/trusted.gpg.d/spotify.gpg
+                        echo "deb http://repository.spotify.com stable non-free" | sudo tee /etc/apt/sources.list.d/spotify.list
+                        sudo apt update
+                    fi
+                    sudo apt install -y spotify-client
+                    print_color "$GREEN" "  ✓ Installed Spotify"
+                    log_message "Installed: Spotify"
+                    ;;
+                fedora)
+                    install_flatpak_app "com.spotify.Client" "Spotify"
+                    ;;
+                arch|manjaro)
+                    if command -v yay &> /dev/null; then
+                        yay -S --noconfirm spotify
+                    elif command -v paru &> /dev/null; then
+                        paru -S --noconfirm spotify
+                    else
+                        install_flatpak_app "com.spotify.Client" "Spotify"
+                    fi
+                    ;;
+            esac
+        fi
+    fi
+    
+    print_color "$GREEN" "✓ Application installation complete"
     print_color "$CYAN" "Note: Some applications may require a system restart or logout/login to appear in menus"
 }
 
@@ -776,46 +861,6 @@ EOF
     print_color "$GREEN" "✓ Additional security tools installation complete"
 }
 
-# Function to install Tor Browser
-install_tor_browser() {
-    print_color "$PURPLE" "=== Tor Browser Installation ==="
-    print_color "$CYAN" ""
-    print_color "$CYAN" "Tor Browser provides anonymous browsing through the Tor network."
-    print_color "$YELLOW" "This will install Tor Browser via Flatpak for maximum privacy."
-    print_color "$CYAN" ""
-    
-    if ! confirm_action "Install Tor Browser?"; then
-        return 0
-    fi
-    
-    log_message "Installing Tor Browser"
-    
-    if ! command -v flatpak &> /dev/null; then
-        print_color "$YELLOW" "Flatpak not found. Installing..."
-        case $DISTRO in
-            ubuntu|debian)
-                sudo apt install -y flatpak
-                ;;
-            fedora)
-                sudo dnf install -y flatpak
-                ;;
-            arch|manjaro)
-                sudo pacman -S --noconfirm flatpak
-                ;;
-        esac
-        flatpak remote-add --if-not-exists flathub https://dl.flathub.org/repo/flathub.flatpakrepo
-    fi
-    
-    if flatpak list --app | grep -q "com.github.micahflee.torbrowser-launcher"; then
-        print_color "$YELLOW" "  ⏭ Tor Browser already installed, skipping"
-    else
-        flatpak install -y flathub com.github.micahflee.torbrowser-launcher
-        print_color "$GREEN" "  ✓ Tor Browser installed"
-        log_message "Installed: Tor Browser"
-    fi
-    
-    print_color "$GREEN" "✓ Tor Browser installation complete"
-}
 
 # Function to configure automatic security updates
 configure_auto_updates() {
@@ -851,6 +896,182 @@ configure_auto_updates() {
     esac
     
     print_color "$GREEN" "✓ Automatic security updates configured"
+}
+
+# Function to configure performance optimizations
+configure_performance() {
+    print_color "$PURPLE" "=== Performance Optimizations ==="
+    print_color "$CYAN" ""
+    print_color "$CYAN" "This will configure system performance optimizations:"
+    print_color "$YELLOW" "  • zswap (compressed swap in RAM)"
+    print_color "$YELLOW" "  • Swap optimization (swappiness tuning)"
+    print_color "$YELLOW" "  • I/O scheduler optimization"
+    print_color "$YELLOW" "  • CPU governor (performance mode)"
+    print_color "$CYAN" ""
+    
+    if ! confirm_action "Configure performance optimizations?"; then
+        return 0
+    fi
+    
+    log_message "Configuring performance optimizations"
+    
+    # Get total RAM in GB
+    TOTAL_RAM_GB=$(free -g | awk '/^Mem:/{print $2}')
+    
+    # Configure zswap
+    print_color "$CYAN" "Configuring zswap..."
+    if [ -d /sys/module/zswap ]; then
+        # zswap is available
+        echo Y | sudo tee /sys/module/zswap/parameters/enabled > /dev/null 2>&1 || true
+        echo lz4 | sudo tee /sys/module/zswap/parameters/compressor > /dev/null 2>&1 || true
+        echo z3fold | sudo tee /sys/module/zswap/parameters/zpool > /dev/null 2>&1 || true
+        echo 20 | sudo tee /sys/module/zswap/parameters/max_pool_percent > /dev/null 2>&1 || true
+        
+        # Make zswap persistent
+        if ! grep -q "zswap.enabled=1" /etc/default/grub 2>/dev/null; then
+            sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="zswap.enabled=1 zswap.compressor=lz4 zswap.zpool=z3fold zswap.max_pool_percent=20 /' /etc/default/grub
+            case $DISTRO in
+                ubuntu|debian)
+                    sudo update-grub 2>/dev/null || true
+                    ;;
+                fedora)
+                    sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
+                    ;;
+                arch|manjaro)
+                    sudo grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
+                    ;;
+            esac
+        fi
+        print_color "$GREEN" "  ✓ zswap configured (20% of RAM)"
+        log_message "Configured: zswap"
+    else
+        print_color "$YELLOW" "  ⏭ zswap module not available, skipping"
+    fi
+    
+    # Configure swappiness (lower = less swap usage, better for SSDs)
+    print_color "$CYAN" "Optimizing swap settings..."
+    SWAPPINESS_VALUE=10  # Lower value for systems with enough RAM
+    if [ "$TOTAL_RAM_GB" -lt 4 ]; then
+        SWAPPINESS_VALUE=30  # More swap for systems with <4GB RAM
+    elif [ "$TOTAL_RAM_GB" -lt 8 ]; then
+        SWAPPINESS_VALUE=20
+    fi
+    
+    # Apply swappiness
+    sudo sysctl vm.swappiness=$SWAPPINESS_VALUE
+    
+    # Make persistent
+    if ! grep -q "vm.swappiness" /etc/sysctl.d/99-privacy-hardening.conf 2>/dev/null; then
+        echo "vm.swappiness=$SWAPPINESS_VALUE" | sudo tee -a /etc/sysctl.d/99-privacy-hardening.conf > /dev/null
+    fi
+    
+    # Configure vfs_cache_pressure (keep more filesystem cache)
+    sudo sysctl vm.vfs_cache_pressure=50
+    if ! grep -q "vm.vfs_cache_pressure" /etc/sysctl.d/99-privacy-hardening.conf 2>/dev/null; then
+        echo "vm.vfs_cache_pressure=50" | sudo tee -a /etc/sysctl.d/99-privacy-hardening.conf > /dev/null
+    fi
+    
+    print_color "$GREEN" "  ✓ Swap optimization configured (swappiness=$SWAPPINESS_VALUE)"
+    log_message "Configured: swap optimization"
+    
+    # Configure I/O scheduler for SSDs
+    print_color "$CYAN" "Optimizing I/O scheduler..."
+    for disk in /sys/block/sd* /sys/block/nvme*; do
+        if [ -d "$disk" ]; then
+            disk_name=$(basename "$disk")
+            # Use none/noop for NVMe, mq-deadline for SSDs
+            if [[ "$disk_name" == nvme* ]]; then
+                echo none | sudo tee "$disk/queue/scheduler" > /dev/null 2>&1 || true
+            else
+                echo mq-deadline | sudo tee "$disk/queue/scheduler" > /dev/null 2>&1 || true
+            fi
+        fi
+    done
+    
+    # Make I/O scheduler persistent via udev rule
+    cat > /tmp/60-io-scheduler.rules <<'EOF'
+# Set I/O scheduler for SSDs and NVMe drives
+ACTION=="add|change", KERNEL=="sd[a-z]|nvme[0-9]*", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="none"
+ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
+EOF
+    sudo mv /tmp/60-io-scheduler.rules /etc/udev/rules.d/
+    print_color "$GREEN" "  ✓ I/O scheduler optimized for SSDs"
+    log_message "Configured: I/O scheduler"
+    
+    # Configure CPU governor (performance mode)
+    print_color "$CYAN" "Configuring CPU governor..."
+    if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then
+        # Check available governors
+        if grep -q "performance" /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null; then
+            for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
+                if [ -f "$cpu" ]; then
+                    echo performance | sudo tee "$cpu" > /dev/null 2>&1 || true
+                fi
+            done
+            
+            # Install cpufrequtils if not present for persistence
+            case $DISTRO in
+                ubuntu|debian)
+                    sudo apt install -y cpufrequtils 2>/dev/null || true
+                    ;;
+                fedora)
+                    sudo dnf install -y kernel-tools 2>/dev/null || true
+                    ;;
+                arch|manjaro)
+                    sudo pacman -S --noconfirm cpupower 2>/dev/null || true
+                    ;;
+            esac
+            
+            # Make CPU governor persistent
+            if command -v cpupower &> /dev/null; then
+                sudo cpupower frequency-set -g performance
+                # Create systemd service for persistence
+                cat > /tmp/cpupower.service <<'EOF'
+[Unit]
+Description=Set CPU governor to performance
+After=sysinit.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/cpupower frequency-set -g performance
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+                sudo mv /tmp/cpupower.service /etc/systemd/system/
+                sudo systemctl enable cpupower.service 2>/dev/null || true
+            fi
+            
+            print_color "$GREEN" "  ✓ CPU governor set to performance mode"
+            log_message "Configured: CPU governor (performance)"
+        else
+            print_color "$YELLOW" "  ⏭ CPU governor not available, skipping"
+        fi
+    else
+        print_color "$YELLOW" "  ⏭ CPU frequency scaling not available, skipping"
+    fi
+    
+    # Additional performance tweaks
+    print_color "$CYAN" "Applying additional performance tweaks..."
+    
+    # Disable transparent hugepages for better performance (optional, can cause issues)
+    # Uncomment if you want this:
+    # echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled > /dev/null 2>&1 || true
+    
+    # Increase file descriptor limits
+    cat > /tmp/99-performance-limits.conf <<'EOF'
+# Performance limits
+* soft nofile 65536
+* hard nofile 65536
+EOF
+    sudo mv /tmp/99-performance-limits.conf /etc/security/limits.d/
+    
+    print_color "$GREEN" "  ✓ File descriptor limits increased"
+    log_message "Configured: file descriptor limits"
+    
+    print_color "$GREEN" "✓ Performance optimizations complete"
+    print_color "$CYAN" "Note: Some changes require a reboot to take full effect"
 }
 
 # Function to create privacy audit script
@@ -935,10 +1156,10 @@ show_summary() {
     print_color "$YELLOW" "• Metadata removal tools (mat2, exiftool)"
     print_color "$YELLOW" "• Application sandboxing with Firejail"
     print_color "$YELLOW" "• System hardening configurations"
-    print_color "$YELLOW" "• Common applications (VS Code, Spotify, Zen Browser, etc.)"
+    print_color "$YELLOW" "• Selective application installation (browsers, dev tools, media, etc.)"
     print_color "$YELLOW" "• Additional security tools (fail2ban, rkhunter, secure-delete)"
-    print_color "$YELLOW" "• Tor Browser for anonymous browsing"
     print_color "$YELLOW" "• Automatic security updates"
+    print_color "$YELLOW" "• Performance optimizations (zswap, I/O scheduler, CPU governor)"
     print_color "$YELLOW" "• Privacy audit script"
     print_color "$CYAN" ""
     print_color "$CYAN" "Useful commands:"
@@ -998,8 +1219,8 @@ main() {
     configure_system_hardening
     install_common_apps
     install_security_tools
-    install_tor_browser
     configure_auto_updates
+    configure_performance
     create_audit_script
     
     show_summary

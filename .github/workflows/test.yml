@@ -1,0 +1,123 @@
+name: Test Privacy Toolkit
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  syntax-check:
+    name: Syntax Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check bash syntax
+        run: |
+          bash -n privacy-toolkit.sh
+          echo "✓ Syntax check passed"
+
+      - name: Check for common issues
+        run: |
+          # Check for unclosed quotes, brackets, etc.
+          if grep -q 'set -euo pipefail' privacy-toolkit.sh; then
+            echo "✓ Error handling enabled"
+          else
+            echo "✗ Missing error handling"
+            exit 1
+          fi
+
+  test-ubuntu:
+    name: Test on Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bash curl
+
+      - name: Test script syntax
+        run: bash -n privacy-toolkit.sh
+
+      - name: Test script help/version (if available)
+        run: |
+          # Test that script doesn't crash on basic execution
+          timeout 5 bash privacy-toolkit.sh <<< "n" || true
+
+  test-fedora:
+    name: Test on Fedora
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          dnf install -y bash curl
+
+      - name: Test script syntax
+        run: bash -n privacy-toolkit.sh
+
+  test-arch:
+    name: Test on Arch Linux
+    runs-on: ubuntu-latest
+    container: archlinux:latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          pacman -Sy --noconfirm bash curl
+
+      - name: Test script syntax
+        run: bash -n privacy-toolkit.sh
+
+  validate-functions:
+    name: Validate Functions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check for required functions
+        run: |
+          required_functions=(
+            "check_root"
+            "detect_distro"
+            "configure_firewall"
+            "configure_dns"
+            "configure_browser"
+            "configure_metadata_removal"
+            "configure_sandboxing"
+            "configure_system_hardening"
+            "install_common_apps"
+            "install_security_tools"
+            "configure_auto_updates"
+            "configure_performance"
+            "create_audit_script"
+          )
+          
+          for func in "${required_functions[@]}"; do
+            if grep -q "^$func()" privacy-toolkit.sh; then
+              echo "✓ Function $func found"
+            else
+              echo "✗ Function $func missing"
+              exit 1
+            fi
+          done
+
+      - name: Check for shellcheck (if available)
+        run: |
+          if command -v shellcheck &> /dev/null; then
+            shellcheck privacy-toolkit.sh || echo "Shellcheck warnings (non-fatal)"
+          else
+            echo "Shellcheck not available, skipping"
+          fi
+

@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  test-ubuntu:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: privacy-toolkit-test:ubuntu
+    container_name: privacy-toolkit-ubuntu-test
+    command: bash -c "bash -n privacy-toolkit.sh && echo '✓ Ubuntu test passed'"
+
+  test-fedora:
+    image: fedora:latest
+    container_name: privacy-toolkit-fedora-test
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: bash -c "dnf install -y bash curl && bash -n privacy-toolkit.sh && echo '✓ Fedora test passed'"
+
+  test-arch:
+    image: archlinux:latest
+    container_name: privacy-toolkit-arch-test
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+    command: bash -c "pacman -Sy --noconfirm bash curl && bash -n privacy-toolkit.sh && echo '✓ Arch test passed'"
+

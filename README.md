@@ -10,9 +10,9 @@ A comprehensive privacy and security hardening script for Linux systems with aut
 - 🗂️ **Metadata Removal** - Tools for stripping metadata from files
 - 🏖️ **Application Sandboxing** - Firejail for isolating applications
 - 🛡️ **System Hardening** - Kernel security parameters and service management
-- 📦 **Common Applications** - Auto-install VS Code, Spotify, Zen Browser, Brave, Discord, GitHub Desktop
+- 📦 **Selective Applications** - Choose from categories: Default (Zen/Brave), Privacy (includes Tor), Development, Communication (Equibop), Media
 - 🔒 **Security Tools** - fail2ban, rkhunter, secure-delete, Bitwarden CLI
-- 🌐 **Tor Browser** - Anonymous browsing via Tor network
+- ⚡ **Performance Optimizations** - zswap, swap tuning, I/O scheduler, CPU governor
 - 🔄 **Auto Updates** - Automatic security updates configuration
 - 📊 **Privacy Audit** - Script to check your privacy configuration
 
@@ -52,16 +52,23 @@ The script will guide you through each step with detailed explanations:
 4. **Metadata Tools** - Installs exiftool and mat2 for removing file metadata
 5. **Sandboxing** - Installs and configures Firejail for application isolation
 6. **System Hardening** - Applies kernel security parameters and optionally disables unnecessary services
-7. **Common Apps** - Installs VS Code, Spotify, Zen Browser, Brave, Discord, GitHub Desktop
+7. **Selective Apps** - Choose application categories:
+   - Default: Zen Browser and/or Brave Browser
+   - Privacy: Browsers + Tor Browser
+   - Development: VS Code, GitHub Desktop
+   - Communication: Equibop
+   - Media: Spotify
+   - Custom: Select individual apps
 8. **Security Tools** - Installs fail2ban, rkhunter, secure-delete, Bitwarden CLI
-9. **Tor Browser** - Optional installation of Tor Browser for anonymous browsing
-10. **Auto Updates** - Configures automatic security updates
+9. **Auto Updates** - Configures automatic security updates
+10. **Performance Optimizations** - Configures zswap, swap tuning, I/O scheduler optimization, CPU governor
 11. **Audit Script** - Creates a `privacy-audit` command to check your setup
 
 ## Customizations
 
 - **DNS Providers**: Choose Mullvad (privacy-focused) or Quad9 (security-focused) during setup
-- **Services**: Optionally disable bluetooth, cups (printing) - avahi-daemon is kept for P2P applications
+- **Services**: Optionally disable bluetooth, cups (printing), avahi-daemon (with warning about P2P applications)
+- **Applications**: Selective installation with categories - choose what you need
 - **Applications**: The script checks if apps are already installed and skips them
 
 ## Useful Commands
