@@ -40,20 +40,11 @@ confirm_action() {
     local message=$1
     local default=${2:-"n"}
     
-    # Check if we're in an interactive terminal
-    if [ ! -t 0 ] || [ ! -t 1 ]; then
-        print_color "$RED" "Error: Not running in an interactive terminal"
-        print_color "$YELLOW" "Please run this script directly in your terminal, not via pipe"
-        return 1
-    fi
-    
     print_color "$YELLOW" "$message"
-    # Use -r to preserve backslashes, -e to allow readline editing
-    read -r -p "Continue? [y/N]: " response
+    read -p "Continue? [y/N]: " -n 1 -r
+    echo
     
-    # Convert to lowercase and check
-    response=$(echo "$response" | tr '[:upper:]' '[:lower:]')
-    if [[ "$response" =~ ^(yes|y)$ ]]; then
+    if [[ $REPLY =~ ^[Yy]$ ]]; then
         return 0
     else
         return 1
@@ -500,9 +491,9 @@ configure_system_hardening() {
     print_color "$CYAN" ""
     print_color "$CYAN" "This will:"
     print_color "$YELLOW" "  • Apply kernel security parameters (network hardening, memory protection)"
-    print_color "$YELLOW" "  • Optionally disable services: bluetooth, cups (printing), avahi-daemon"
+    print_color "$YELLOW" "  • Optionally disable services: bluetooth, cups (printing)"
     print_color "$CYAN" ""
-    print_color "$YELLOW" "Note: You'll be prompted for each service. avahi-daemon warning will appear if you choose to disable it."
+    print_color "$GREEN" "Note: avahi-daemon will be kept enabled for P2P applications"
     print_color "$CYAN" ""
     print_color "$CYAN" "Kernel hardening includes:"
     print_color "$YELLOW" "  - Disable IP redirects and source routing"
@@ -524,19 +515,10 @@ configure_system_hardening() {
     
     for service in "${SERVICES_TO_DISABLE[@]}"; do
         if systemctl is-enabled "$service" &>/dev/null; then
-            if [ "$service" = "avahi-daemon" ]; then
-                print_color "$YELLOW" "Warning: Disabling avahi-daemon may break P2P applications and local network discovery"
-                if confirm_action "Disable $service?"; then
-                    sudo systemctl disable "$service"
-                    sudo systemctl stop "$service"
-                    log_message "Disabled service: $service"
-                fi
-            else
-                if confirm_action "Disable $service?"; then
-                    sudo systemctl disable "$service"
-                    sudo systemctl stop "$service"
-                    log_message "Disabled service: $service"
-                fi
+            if confirm_action "Disable $service?"; then
+                sudo systemctl disable "$service"
+                sudo systemctl stop "$service"
+                log_message "Disabled service: $service"
             fi
         fi
     done
@@ -629,7 +611,7 @@ install_common_apps() {
     print_color "$YELLOW" "  1) Default (Zen Browser and/or Brave Browser only)"
     print_color "$YELLOW" "  2) Privacy (Zen Browser, Brave Browser, Tor Browser)"
     print_color "$YELLOW" "  3) Development (VS Code, GitHub Desktop)"
-    print_color "$YELLOW" "  4) Communication (Equibop)"
+    print_color "$YELLOW" "  4) Communication (Discord)"
     print_color "$YELLOW" "  5) Media (Spotify)"
     print_color "$YELLOW" "  6) Custom selection"
     print_color "$CYAN" ""
@@ -651,7 +633,7 @@ install_common_apps() {
     INSTALL_TOR=false
     INSTALL_VSCODE=false
     INSTALL_GITHUB=false
-    INSTALL_EQUIBOP=false
+    INSTALL_DISCORD=false
     INSTALL_SPOTIFY=false
     
     for choice in "${CHOICES[@]}"; do
@@ -671,7 +653,7 @@ install_common_apps() {
                 INSTALL_GITHUB=true
                 ;;
             4)
-                INSTALL_EQUIBOP=true
+                INSTALL_DISCORD=true
                 ;;
             5)
                 INSTALL_SPOTIFY=true
@@ -690,8 +672,8 @@ install_common_apps() {
                 [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_VSCODE=true
                 read -p "Install GitHub Desktop? [y/N]: " -n 1 -r; echo
                 [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_GITHUB=true
-                read -p "Install Equibop? [y/N]: " -n 1 -r; echo
-                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_EQUIBOP=true
+                read -p "Install Discord? [y/N]: " -n 1 -r; echo
+                [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_DISCORD=true
                 read -p "Install Spotify? [y/N]: " -n 1 -r; echo
                 [[ $REPLY =~ ^[Yy]$ ]] && INSTALL_SPOTIFY=true
                 ;;
@@ -753,9 +735,9 @@ install_common_apps() {
         install_flatpak_app "io.github.shiftey.Desktop" "GitHub Desktop"
     fi
     
-    # Install Equibop if selected
-    if [ "$INSTALL_EQUIBOP" = true ]; then
-        install_flatpak_app "org.equicord.equibop" "Equibop"
+    # Install Discord if selected
+    if [ "$INSTALL_DISCORD" = true ]; then
+        install_flatpak_app "com.discordapp.Discord" "Discord"
     fi
     
     # Install Spotify if selected
@@ -907,182 +889,6 @@ configure_auto_updates() {
     print_color "$GREEN" "✓ Automatic security updates configured"
 }
 
-# Function to configure performance optimizations
-configure_performance() {
-    print_color "$PURPLE" "=== Performance Optimizations ==="
-    print_color "$CYAN" ""
-    print_color "$CYAN" "This will configure system performance optimizations:"
-    print_color "$YELLOW" "  • zswap (compressed swap in RAM)"
-    print_color "$YELLOW" "  • Swap optimization (swappiness tuning)"
-    print_color "$YELLOW" "  • I/O scheduler optimization"
-    print_color "$YELLOW" "  • CPU governor (performance mode)"
-    print_color "$CYAN" ""
-    
-    if ! confirm_action "Configure performance optimizations?"; then
-        return 0
-    fi
-    
-    log_message "Configuring performance optimizations"
-    
-    # Get total RAM in GB
-    TOTAL_RAM_GB=$(free -g | awk '/^Mem:/{print $2}')
-    
-    # Configure zswap
-    print_color "$CYAN" "Configuring zswap..."
-    if [ -d /sys/module/zswap ]; then
-        # zswap is available
-        echo Y | sudo tee /sys/module/zswap/parameters/enabled > /dev/null 2>&1 || true
-        echo lz4 | sudo tee /sys/module/zswap/parameters/compressor > /dev/null 2>&1 || true
-        echo z3fold | sudo tee /sys/module/zswap/parameters/zpool > /dev/null 2>&1 || true
-        echo 20 | sudo tee /sys/module/zswap/parameters/max_pool_percent > /dev/null 2>&1 || true
-        
-        # Make zswap persistent
-        if ! grep -q "zswap.enabled=1" /etc/default/grub 2>/dev/null; then
-            sudo sed -i 's/GRUB_CMDLINE_LINUX_DEFAULT="/GRUB_CMDLINE_LINUX_DEFAULT="zswap.enabled=1 zswap.compressor=lz4 zswap.zpool=z3fold zswap.max_pool_percent=20 /' /etc/default/grub
-            case $DISTRO in
-                ubuntu|debian)
-                    sudo update-grub 2>/dev/null || true
-                    ;;
-                fedora)
-                    sudo grub2-mkconfig -o /boot/grub2/grub.cfg 2>/dev/null || true
-                    ;;
-                arch|manjaro)
-                    sudo grub-mkconfig -o /boot/grub/grub.cfg 2>/dev/null || true
-                    ;;
-            esac
-        fi
-        print_color "$GREEN" "  ✓ zswap configured (20% of RAM)"
-        log_message "Configured: zswap"
-    else
-        print_color "$YELLOW" "  ⏭ zswap module not available, skipping"
-    fi
-    
-    # Configure swappiness (lower = less swap usage, better for SSDs)
-    print_color "$CYAN" "Optimizing swap settings..."
-    SWAPPINESS_VALUE=10  # Lower value for systems with enough RAM
-    if [ "$TOTAL_RAM_GB" -lt 4 ]; then
-        SWAPPINESS_VALUE=30  # More swap for systems with <4GB RAM
-    elif [ "$TOTAL_RAM_GB" -lt 8 ]; then
-        SWAPPINESS_VALUE=20
-    fi
-    
-    # Apply swappiness
-    sudo sysctl vm.swappiness=$SWAPPINESS_VALUE
-    
-    # Make persistent
-    if ! grep -q "vm.swappiness" /etc/sysctl.d/99-privacy-hardening.conf 2>/dev/null; then
-        echo "vm.swappiness=$SWAPPINESS_VALUE" | sudo tee -a /etc/sysctl.d/99-privacy-hardening.conf > /dev/null
-    fi
-    
-    # Configure vfs_cache_pressure (keep more filesystem cache)
-    sudo sysctl vm.vfs_cache_pressure=50
-    if ! grep -q "vm.vfs_cache_pressure" /etc/sysctl.d/99-privacy-hardening.conf 2>/dev/null; then
-        echo "vm.vfs_cache_pressure=50" | sudo tee -a /etc/sysctl.d/99-privacy-hardening.conf > /dev/null
-    fi
-    
-    print_color "$GREEN" "  ✓ Swap optimization configured (swappiness=$SWAPPINESS_VALUE)"
-    log_message "Configured: swap optimization"
-    
-    # Configure I/O scheduler for SSDs
-    print_color "$CYAN" "Optimizing I/O scheduler..."
-    for disk in /sys/block/sd* /sys/block/nvme*; do
-        if [ -d "$disk" ]; then
-            disk_name=$(basename "$disk")
-            # Use none/noop for NVMe, mq-deadline for SSDs
-            if [[ "$disk_name" == nvme* ]]; then
-                echo none | sudo tee "$disk/queue/scheduler" > /dev/null 2>&1 || true
-            else
-                echo mq-deadline | sudo tee "$disk/queue/scheduler" > /dev/null 2>&1 || true
-            fi
-        fi
-    done
-    
-    # Make I/O scheduler persistent via udev rule
-    cat > /tmp/60-io-scheduler.rules <<'EOF'
-# Set I/O scheduler for SSDs and NVMe drives
-ACTION=="add|change", KERNEL=="sd[a-z]|nvme[0-9]*", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="none"
-ACTION=="add|change", KERNEL=="sd[a-z]", ATTR{queue/rotational}=="0", ATTR{queue/scheduler}="mq-deadline"
-EOF
-    sudo mv /tmp/60-io-scheduler.rules /etc/udev/rules.d/
-    print_color "$GREEN" "  ✓ I/O scheduler optimized for SSDs"
-    log_message "Configured: I/O scheduler"
-    
-    # Configure CPU governor (performance mode)
-    print_color "$CYAN" "Configuring CPU governor..."
-    if [ -d /sys/devices/system/cpu/cpu0/cpufreq ]; then
-        # Check available governors
-        if grep -q "performance" /sys/devices/system/cpu/cpu0/cpufreq/scaling_available_governors 2>/dev/null; then
-            for cpu in /sys/devices/system/cpu/cpu*/cpufreq/scaling_governor; do
-                if [ -f "$cpu" ]; then
-                    echo performance | sudo tee "$cpu" > /dev/null 2>&1 || true
-                fi
-            done
-            
-            # Install cpufrequtils if not present for persistence
-            case $DISTRO in
-                ubuntu|debian)
-                    sudo apt install -y cpufrequtils 2>/dev/null || true
-                    ;;
-                fedora)
-                    sudo dnf install -y kernel-tools 2>/dev/null || true
-                    ;;
-                arch|manjaro)
-                    sudo pacman -S --noconfirm cpupower 2>/dev/null || true
-                    ;;
-            esac
-            
-            # Make CPU governor persistent
-            if command -v cpupower &> /dev/null; then
-                sudo cpupower frequency-set -g performance
-                # Create systemd service for persistence
-                cat > /tmp/cpupower.service <<'EOF'
-[Unit]
-Description=Set CPU governor to performance
-After=sysinit.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/cpupower frequency-set -g performance
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target
-EOF
-                sudo mv /tmp/cpupower.service /etc/systemd/system/
-                sudo systemctl enable cpupower.service 2>/dev/null || true
-            fi
-            
-            print_color "$GREEN" "  ✓ CPU governor set to performance mode"
-            log_message "Configured: CPU governor (performance)"
-        else
-            print_color "$YELLOW" "  ⏭ CPU governor not available, skipping"
-        fi
-    else
-        print_color "$YELLOW" "  ⏭ CPU frequency scaling not available, skipping"
-    fi
-    
-    # Additional performance tweaks
-    print_color "$CYAN" "Applying additional performance tweaks..."
-    
-    # Disable transparent hugepages for better performance (optional, can cause issues)
-    # Uncomment if you want this:
-    # echo never | sudo tee /sys/kernel/mm/transparent_hugepage/enabled > /dev/null 2>&1 || true
-    
-    # Increase file descriptor limits
-    cat > /tmp/99-performance-limits.conf <<'EOF'
-# Performance limits
-* soft nofile 65536
-* hard nofile 65536
-EOF
-    sudo mv /tmp/99-performance-limits.conf /etc/security/limits.d/
-    
-    print_color "$GREEN" "  ✓ File descriptor limits increased"
-    log_message "Configured: file descriptor limits"
-    
-    print_color "$GREEN" "✓ Performance optimizations complete"
-    print_color "$CYAN" "Note: Some changes require a reboot to take full effect"
-}
-
 # Function to create privacy audit script
 create_audit_script() {
     print_color "$PURPLE" "=== Creating Privacy Audit Script ==="
@@ -1165,10 +971,10 @@ show_summary() {
     print_color "$YELLOW" "• Metadata removal tools (mat2, exiftool)"
     print_color "$YELLOW" "• Application sandboxing with Firejail"
     print_color "$YELLOW" "• System hardening configurations"
-    print_color "$YELLOW" "• Selective application installation (browsers, dev tools, media, etc.)"
+    print_color "$YELLOW" "• Common applications (VS Code, Spotify, Zen Browser, etc.)"
     print_color "$YELLOW" "• Additional security tools (fail2ban, rkhunter, secure-delete)"
+    print_color "$YELLOW" "• Tor Browser for anonymous browsing"
     print_color "$YELLOW" "• Automatic security updates"
-    print_color "$YELLOW" "• Performance optimizations (zswap, I/O scheduler, CPU governor)"
     print_color "$YELLOW" "• Privacy audit script"
     print_color "$CYAN" ""
     print_color "$CYAN" "Useful commands:"
@@ -1185,16 +991,9 @@ show_summary() {
 # Main menu
 main_menu() {
     clear
-    # Calculate centered title
-    local title="$SCRIPT_NAME v$VERSION"
-    local box_width=42
-    local title_len=${#title}
-    local padding=$(( (box_width - title_len - 2) / 2 ))
-    local title_line=$(printf "║%*s%s%*s║" $padding "" "$title" $padding "")
-    
-    print_color "$PURPLE" "╔══════════════════════════════════════════╗"
-    print_color "$PURPLE" "$title_line"
-    print_color "$PURPLE" "╚══════════════════════════════════════════╝"
+    print_color "$PURPLE" "╔════════════════════════════════════════╗"
+    print_color "$PURPLE" "║          $SCRIPT_NAME v$VERSION          ║"
+    print_color "$PURPLE" "╚════════════════════════════════════════╝"
     print_color "$CYAN" ""
     print_color "$CYAN" "This toolkit will help configure privacy and security"
     print_color "$CYAN" "settings on your Linux system. Each step will ask for"
@@ -1236,7 +1035,6 @@ main() {
     install_common_apps
     install_security_tools
     configure_auto_updates
-    configure_performance
     create_audit_script
     
     show_summary

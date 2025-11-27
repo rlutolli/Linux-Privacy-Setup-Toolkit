@@ -1,12 +1,21 @@
 # Quick Installation Guide
 
-## One-Liner Install (Recommended)
+## Quick Install
 
-Copy and paste this command into your terminal:
+Copy and paste these commands into your terminal:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rlutolli/Linux-Privacy-Setup-Toolkit/main/privacy-toolkit.sh | bash
+# Download the script
+curl -fsSL https://raw.githubusercontent.com/rlutolli/Linux-Privacy-Setup-Toolkit/main/privacy-toolkit.sh -o privacy-toolkit.sh
+
+# Make it executable
+chmod +x privacy-toolkit.sh
+
+# Run it
+./privacy-toolkit.sh
 ```
+
+**Note:** This script requires an interactive terminal. Download and run it directly (don't pipe to bash).
 
 This will:
 - Download the latest version of the script
