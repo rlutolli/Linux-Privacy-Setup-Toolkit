@@ -76,7 +76,7 @@ The script will guide you through each step with detailed explanations:
 ## Customizations
 
 - **DNS Providers**: Choose Mullvad (privacy-focused) or Quad9 (security-focused) during setup
-- **Services**: Optionally disable bluetooth, cups (printing), avahi-daemon (with warning about P2P applications)
+- **Services**: Optionally disable bluetooth, cups (printing), avahi-daemon (warning shown for avahi-daemon as it may break P2P applications)
 - **Applications**: Selective installation with categories - choose what you need
 - **Applications**: The script checks if apps are already installed and skips them
 
