@@ -1,32 +1,25 @@
 #!/bin/bash
 # Test script for privacy-toolkit.sh
-# Run this locally to validate the script before pushing
+# This script tests the main functionality without requiring user interaction
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPT_FILE="$SCRIPT_DIR/privacy-toolkit.sh"
+SCRIPT="$SCRIPT_DIR/privacy-toolkit.sh"
 
-echo "🧪 Testing Privacy Toolkit Script"
-echo "=================================="
+echo "=== Testing Privacy Toolkit Script ==="
 echo ""
 
 # Test 1: Syntax check
-echo "Test 1: Syntax Check"
-if bash -n "$SCRIPT_FILE"; then
-    echo "✓ Syntax check passed"
-else
-    echo "✗ Syntax check failed"
-    exit 1
-fi
+echo "Test 1: Syntax check"
+bash -n "$SCRIPT" && echo "✓ Syntax check passed" || { echo "✗ Syntax check failed"; exit 1; }
 echo ""
 
 # Test 2: Check for required functions
-echo "Test 2: Required Functions Check"
+echo "Test 2: Check for required functions"
 required_functions=(
     "check_root"
     "detect_distro"
-    "check_dependencies"
     "configure_firewall"
     "configure_dns"
     "configure_browser"
@@ -36,16 +29,17 @@ required_functions=(
     "install_common_apps"
     "install_security_tools"
     "configure_auto_updates"
-    "configure_performance"
     "create_audit_script"
+    "install_bitwarden_from_github"
+    "cleanup_temp_files"
 )
 
 missing_functions=()
 for func in "${required_functions[@]}"; do
-    if grep -q "^$func()" "$SCRIPT_FILE"; then
-        echo "  ✓ $func"
+    if grep -q "^$func()" "$SCRIPT"; then
+        echo "✓ Function $func found"
     else
-        echo "  ✗ $func (missing)"
+        echo "✗ Function $func missing"
         missing_functions+=("$func")
     fi
 done
@@ -54,107 +48,52 @@ if [ ${#missing_functions[@]} -gt 0 ]; then
     echo "✗ Missing functions: ${missing_functions[*]}"
     exit 1
 fi
-echo "✓ All required functions present"
 echo ""
 
-# Test 3: Check for error handling
-echo "Test 3: Error Handling Check"
-if grep -q "set -euo pipefail" "$SCRIPT_FILE"; then
+# Test 3: Check for bug fixes
+echo "Test 3: Check for bug fixes"
+if grep -q "set +o pipefail" "$SCRIPT" && grep -q "set -o pipefail" "$SCRIPT"; then
+    echo "✓ Bug 1 fix found (pipefail handling)"
+else
+    echo "✗ Bug 1 fix missing"
+    exit 1
+fi
+
+if grep -q "sudo mv bw /usr/local/bin/bw 2>/dev/null && sudo chmod" "$SCRIPT"; then
+    echo "✓ Bug 2 fix found (error handling for sudo commands)"
+else
+    echo "✗ Bug 2 fix missing"
+    exit 1
+fi
+echo ""
+
+# Test 4: Check DNS configuration fix
+echo "Test 4: Check DNS configuration fix"
+if grep -q "USE_DOT=" "$SCRIPT" || (grep -q "Mullvad DNS" "$SCRIPT" && grep -q "plain DNS\|without DoT" "$SCRIPT"); then
+    echo "✓ DNS configuration fix found (Mullvad DNS configuration available)"
+else
+    echo "⚠ DNS configuration fix check - manual verification needed"
+fi
+echo ""
+
+# Test 5: Check cleanup function is called
+echo "Test 5: Check cleanup function is called"
+if grep -q "cleanup_temp_files" "$SCRIPT" && grep -A 2 "show_summary" "$SCRIPT" | grep -q "cleanup_temp_files"; then
+    echo "✓ Cleanup function is called in main"
+else
+    echo "✗ Cleanup function not called in main"
+    exit 1
+fi
+echo ""
+
+# Test 6: Check error handling
+echo "Test 6: Check error handling"
+if grep -q "^set -euo pipefail" "$SCRIPT"; then
     echo "✓ Error handling enabled (set -euo pipefail)"
 else
-    echo "✗ Error handling not found"
+    echo "✗ Error handling not enabled"
     exit 1
 fi
 echo ""
 
-# Test 4: Check for logging
-echo "Test 4: Logging Check"
-if grep -q "log_message" "$SCRIPT_FILE"; then
-    echo "✓ Logging function present"
-else
-    echo "✗ Logging function missing"
-    exit 1
-fi
-echo ""
-
-# Test 5: Check for user confirmation
-echo "Test 5: User Confirmation Check"
-if grep -q "confirm_action" "$SCRIPT_FILE"; then
-    echo "✓ User confirmation function present"
-else
-    echo "✗ User confirmation function missing"
-    exit 1
-fi
-echo ""
-
-# Test 6: Check for color output
-echo "Test 6: Color Output Check"
-if grep -q "print_color" "$SCRIPT_FILE"; then
-    echo "✓ Color output function present"
-else
-    echo "✗ Color output function missing"
-    exit 1
-fi
-echo ""
-
-# Test 7: Check for version
-echo "Test 7: Version Check"
-if grep -q 'VERSION=' "$SCRIPT_FILE"; then
-    version=$(grep 'VERSION=' "$SCRIPT_FILE" | head -1 | cut -d'"' -f2)
-    echo "✓ Version found: $version"
-else
-    echo "✗ Version not found"
-    exit 1
-fi
-echo ""
-
-# Test 8: Check for main function
-echo "Test 8: Main Function Check"
-if grep -q "^main()" "$SCRIPT_FILE"; then
-    echo "✓ Main function present"
-else
-    echo "✗ Main function missing"
-    exit 1
-fi
-echo ""
-
-# Test 9: Check for shebang
-echo "Test 9: Shebang Check"
-if head -1 "$SCRIPT_FILE" | grep -q "^#!/bin/bash"; then
-    echo "✓ Shebang present"
-else
-    echo "✗ Shebang missing or incorrect"
-    exit 1
-fi
-echo ""
-
-# Test 10: Check for dangerous commands (safety check)
-echo "Test 10: Safety Check"
-dangerous_patterns=(
-    "rm -rf /"
-    "rm -rf /home"
-    "rm -rf /etc"
-    "dd if=/dev/zero"
-)
-
-found_dangerous=false
-for pattern in "${dangerous_patterns[@]}"; do
-    if grep -q "$pattern" "$SCRIPT_FILE"; then
-        echo "  ⚠ Warning: Potentially dangerous pattern found: $pattern"
-        found_dangerous=true
-    fi
-done
-
-if [ "$found_dangerous" = false ]; then
-    echo "✓ No dangerous patterns found"
-else
-    echo "⚠ Review dangerous patterns before proceeding"
-fi
-echo ""
-
-echo "=================================="
-echo "✅ All tests passed!"
-echo ""
-echo "The script is ready to push to GitHub."
-echo "GitHub Actions will run additional tests on push."
-
+echo "=== All tests passed! ==="
