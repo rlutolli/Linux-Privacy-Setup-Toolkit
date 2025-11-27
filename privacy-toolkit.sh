@@ -40,11 +40,20 @@ confirm_action() {
     local message=$1
     local default=${2:-"n"}
     
-    print_color "$YELLOW" "$message"
-    read -p "Continue? [y/N]: " -n 1 -r
-    echo
+    # Check if we're in an interactive terminal
+    if [ ! -t 0 ] || [ ! -t 1 ]; then
+        print_color "$RED" "Error: Not running in an interactive terminal"
+        print_color "$YELLOW" "Please run this script directly in your terminal, not via pipe"
+        return 1
+    fi
     
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
+    print_color "$YELLOW" "$message"
+    # Use -r to preserve backslashes, -e to allow readline editing
+    read -r -p "Continue? [y/N]: " response
+    
+    # Convert to lowercase and check
+    response=$(echo "$response" | tr '[:upper:]' '[:lower:]')
+    if [[ "$response" =~ ^(yes|y)$ ]]; then
         return 0
     else
         return 1
@@ -1176,9 +1185,16 @@ show_summary() {
 # Main menu
 main_menu() {
     clear
-    print_color "$PURPLE" "╔════════════════════════════════════════╗"
-    print_color "$PURPLE" "║          $SCRIPT_NAME v$VERSION          ║"
-    print_color "$PURPLE" "╚════════════════════════════════════════╝"
+    # Calculate centered title
+    local title="$SCRIPT_NAME v$VERSION"
+    local box_width=42
+    local title_len=${#title}
+    local padding=$(( (box_width - title_len - 2) / 2 ))
+    local title_line=$(printf "║%*s%s%*s║" $padding "" "$title" $padding "")
+    
+    print_color "$PURPLE" "╔══════════════════════════════════════════╗"
+    print_color "$PURPLE" "$title_line"
+    print_color "$PURPLE" "╚══════════════════════════════════════════╝"
     print_color "$CYAN" ""
     print_color "$CYAN" "This toolkit will help configure privacy and security"
     print_color "$CYAN" "settings on your Linux system. Each step will ask for"
