@@ -777,6 +777,125 @@ install_common_apps() {
     print_color "$CYAN" "Note: Some applications may require a system restart or logout/login to appear in menus"
 }
 
+}
+
+# Function to install Bitwarden CLI from GitHub releases (for systems without snap)
+install_bitwarden_from_github() {
+    print_color "$CYAN" "  Downloading Bitwarden CLI from GitHub..."
+    
+    # Save current directory - CRITICAL: must restore in all code paths
+    local original_dir=$(pwd)
+    local temp_dir=""
+    
+    # Ensure unzip is installed
+    if ! command -v unzip &> /dev/null; then
+        print_color "$CYAN" "  Installing unzip..."
+        case $DISTRO in
+            ubuntu|debian)
+                sudo apt install -y unzip || return 1
+                ;;
+            fedora)
+                sudo dnf install -y unzip || return 1
+                ;;
+            arch|manjaro)
+                sudo pacman -S --noconfirm unzip || return 1
+                ;;
+        esac
+    fi
+    
+    # Detect architecture
+    ARCH=$(uname -m)
+    case "$ARCH" in
+        x86_64)
+            BW_ARCH="amd64"
+            ;;
+        aarch64|arm64)
+            BW_ARCH="arm64"
+            ;;
+        armv7l|armhf)
+            BW_ARCH="armv7"
+            ;;
+        *)
+            print_color "$RED" "  ✗ Unsupported architecture: $ARCH"
+            print_color "$CYAN" "  Install Bitwarden CLI manually from: https://github.com/bitwarden/cli/releases"
+            return 1
+            ;;
+    esac
+    
+    # Get latest version and construct URL (one curl call)
+    # Bug 1 Fix: Disable pipefail temporarily for this pipeline to prevent exit on failure
+    # With set -o pipefail, any command failure in pipeline would exit script
+    # This ensures graceful error handling even if curl, grep, or sed fail
+    set +o pipefail
+    BW_VERSION=$(curl -s https://api.github.com/repos/bitwarden/cli/releases/latest 2>/dev/null | grep '"tag_name":' 2>/dev/null | sed -E 's/.*"([^"]+)".*//' 2>/dev/null | sed 's/v//' 2>/dev/null || echo "")
+    set -o pipefail
+    BW_URL="https://github.com/bitwarden/cli/releases/download/v${BW_VERSION}/bw-linux-${BW_ARCH}-${BW_VERSION}.zip"
+    
+    if [ -z "$BW_VERSION" ]; then
+        print_color "$YELLOW" "  ⏭ Could not determine latest version, skipping"
+        print_color "$CYAN" "  Install manually: https://github.com/bitwarden/cli/releases"
+        return 1
+    fi
+    
+    # Create temp directory
+    temp_dir=$(mktemp -d) || {
+        print_color "$RED" "  ✗ Failed to create temp directory"
+        return 1
+    }
+    
+    # Ensure cleanup happens even on failure - trap will restore directory and cleanup
+    trap "cd '$original_dir' 2>/dev/null || true; rm -rf '$temp_dir' 2>/dev/null || true" EXIT
+    
+    # Change to temp directory
+    if ! cd "$temp_dir" 2>/dev/null; then
+        print_color "$RED" "  ✗ Failed to change to temp directory"
+        rm -rf "$temp_dir" 2>/dev/null || true
+        trap - EXIT
+        return 1
+    fi
+    
+    # Download, extract, and install with proper error handling
+    if curl -fsSL "$BW_URL" -o bw.zip 2>/dev/null && unzip -q bw.zip 2>/dev/null && [ -f bw ]; then
+        # Bug 2 Fix: Wrap sudo commands in conditional with error handling
+        # This ensures directory restoration and cleanup even if sudo commands fail
+        # With set -e, failure would exit script without cleanup
+        if (sudo mv bw /usr/local/bin/bw 2>/dev/null && sudo chmod +x /usr/local/bin/bw 2>/dev/null); then
+            cd "$original_dir" || true
+            trap - EXIT  # Remove trap before cleanup
+            rm -rf "$temp_dir" 2>/dev/null || true
+            print_color "$GREEN" "  ✓ Bitwarden CLI installed from GitHub (v${BW_VERSION})"
+            log_message "Installed: Bitwarden CLI (GitHub v${BW_VERSION})"
+            return 0
+        else
+            print_color "$RED" "  ✗ Failed to install Bitwarden CLI binary (permission issue?)"
+            cd "$original_dir" || true
+            trap - EXIT
+            rm -rf "$temp_dir" 2>/dev/null || true
+            return 1
+        fi
+    else
+        print_color "$RED" "  ✗ Failed to download or extract Bitwarden CLI"
+        cd "$original_dir" || true
+        trap - EXIT
+        rm -rf "$temp_dir" 2>/dev/null || true
+        return 1
+    fi
+}
+
+# Function to cleanup temporary files
+cleanup_temp_files() {
+    print_color "$CYAN" "Cleaning up temporary files..."
+    # Clean up any temp files created during script execution
+    # Remove old log files (older than 7 days)
+    find /tmp -maxdepth 1 -name "privacy_toolkit_*.log" -type f -mtime +7 -delete 2>/dev/null || true
+    # Remove any leftover temp files from this script run
+    rm -f /tmp/browser-common.local /tmp/99-privacy-hardening.conf 2>/dev/null || true
+    # Clean up any other temp files owned by user
+    find /tmp -maxdepth 1 -name "*.tmp" -user "$USER" -type f -delete 2>/dev/null || true
+    print_color "$GREEN" "✓ Cleanup complete"
+}
+
+# Function to install additional security tools
 # Function to install additional security tools
 install_security_tools() {
     print_color "$PURPLE" "=== Additional Security Tools ==="
@@ -798,7 +917,26 @@ install_security_tools() {
     case $DISTRO in
         ubuntu|debian)
             sudo apt update
-            sudo apt install -y fail2ban rkhunter secure-delete tor bitwarden-cli
+            sudo apt install -y fail2ban rkhunter secure-delete tor
+            # Bitwarden CLI installation (try snap first, then GitHub binary)
+            # Use || true to prevent script exit on failure (set -e is enabled)
+            if ! command -v bw &> /dev/null; then
+                if command -v snap &> /dev/null; then
+                    print_color "$CYAN" "  Installing Bitwarden CLI via snap..."
+                    if sudo snap install bw 2>/dev/null; then
+                        print_color "$GREEN" "  ✓ Bitwarden CLI installed via snap"
+                        log_message "Installed: Bitwarden CLI (snap)"
+                    else
+                        print_color "$YELLOW" "  ⏭ Snap installation failed, trying GitHub binary..."
+                        install_bitwarden_from_github || true
+                    fi
+                else
+                    print_color "$YELLOW" "  ⏭ Snap not available (common on Linux Mint/Zorin), using GitHub binary..."
+                    install_bitwarden_from_github || true
+                fi
+            else
+                print_color "$YELLOW" "  ⏭ Bitwarden CLI already installed, skipping"
+            fi
             ;;
         fedora)
             sudo dnf install -y fail2ban rkhunter secure-delete tor
