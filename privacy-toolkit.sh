@@ -776,7 +776,6 @@ install_common_apps() {
     print_color "$GREEN" "✓ Application installation complete"
     print_color "$CYAN" "Note: Some applications may require a system restart or logout/login to appear in menus"
 }
-
 }
 
 # Function to install Bitwarden CLI from GitHub releases (for systems without snap)
