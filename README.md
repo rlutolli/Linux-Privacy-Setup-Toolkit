@@ -28,7 +28,7 @@ A comprehensive privacy and security hardening script for Linux systems with aut
 
 ```bash
 # Download the script
-curl -fsSL https://raw.githubusercontent.com/rlutolli/Linux-Privacy-Setup-Toolkit/main/privacy-toolkit.sh -o privacy-toolkit.sh
+curl -fsSL https://raw.githubusercontent.com/YOUR_USERNAME/Linux-Privacy-Setup-Toolkit/main/privacy-toolkit.sh -o privacy-toolkit.sh
 
 # Make it executable
 chmod +x privacy-toolkit.sh

@@ -19,13 +19,13 @@ GitHub no longer accepts passwords. You need to use either:
 ### Step 2: Switch back to HTTPS and use the token
 
 ```bash
-cd "/home/rlutolli/Downloads/Linux-Privacy-Setup-Toolkit-main/Linux Privacy Setup Toolkit"
+cd /path/to/your/repository
 
-# Switch back to HTTPS
-git remote set-url origin https://github.com/rlutolli/Linux-Privacy-Setup-Toolkit.git
+# Switch to HTTPS (replace YOUR_USERNAME with your GitHub username)
+git remote set-url origin https://github.com/YOUR_USERNAME/Linux-Privacy-Setup-Toolkit.git
 
 # Push (it will ask for username and password)
-# Username: rlutolli
+# Username: YOUR_USERNAME
 # Password: PASTE_YOUR_TOKEN_HERE (not your GitHub password!)
 git push -u origin main
 ```
@@ -46,12 +46,12 @@ git config --global credential.helper store
 
 ### Step 1: Add your SSH key to GitHub
 
-Your SSH public key is:
-```
-ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEhKbPPCcY/bW2O/ytA8Se6y5tKSNgPBAJMrpScJbqT5 rlutolli@york.citycollege.eu
-```
-
-1. Copy the key above (or run: `cat ~/.ssh/id_ed25519.pub`)
+1. Get your SSH public key:
+   ```bash
+   cat ~/.ssh/id_ed25519.pub
+   # Or if you use RSA:
+   cat ~/.ssh/id_rsa.pub
+   ```
 2. Go to https://github.com/settings/keys
 3. Click "New SSH key"
 4. Title: "Linux Privacy Toolkit"
@@ -61,13 +61,16 @@ ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEhKbPPCcY/bW2O/ytA8Se6y5tKSNgPBAJMrpScJbqT5
 ### Step 2: Test and push
 
 ```bash
-cd "/home/rlutolli/Downloads/Linux-Privacy-Setup-Toolkit-main/Linux Privacy Setup Toolkit"
+cd /path/to/your/repository
 
 # Test SSH connection
 ssh -T git@github.com
-# Should say: "Hi rlutolli! You've successfully authenticated..."
+# Should say: "Hi YOUR_USERNAME! You've successfully authenticated..."
 
-# Push (already configured for SSH)
+# Switch to SSH (replace YOUR_USERNAME)
+git remote set-url origin git@github.com:YOUR_USERNAME/Linux-Privacy-Setup-Toolkit.git
+
+# Push
 git push -u origin main
 ```
 
@@ -75,8 +78,9 @@ git push -u origin main
 
 ## Current Setup
 
-Your repository is already configured for SSH:
-- Remote URL: `git@github.com:rlutolli/Linux-Privacy-Setup-Toolkit.git`
+Check your current remote configuration:
+```bash
+git remote -v
+```
 
 If SSH doesn't work (network/firewall), use Option 1 (Personal Access Token) instead.
-

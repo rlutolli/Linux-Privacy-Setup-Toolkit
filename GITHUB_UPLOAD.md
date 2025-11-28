@@ -11,7 +11,7 @@
 After forking, GitHub will show you the repository URL. Use one of these commands:
 
 ```bash
-cd "/home/rlutolli/Downloads/Linux-Privacy-Setup-Toolkit-main/Linux Privacy Setup Toolkit"
+cd /path/to/your/repository
 
 # If you forked it, add your fork as remote (replace YOUR_USERNAME)
 git remote add origin https://github.com/YOUR_USERNAME/Linux-Privacy-Setup-Toolkit.git
@@ -58,4 +58,7 @@ git push
 - ✅ `README.md` - Documentation
 - ✅ `.gitignore` - Git ignore file
 - ⚠️ PDF guide is not included (too large, add manually if needed)
+
+
+
 
