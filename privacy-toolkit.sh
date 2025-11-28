@@ -65,14 +65,13 @@ detect_distro() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         DISTRO=$ID
-        DISTRO_NAME=${NAME:-$ID}
         VERSION_ID=${VERSION_ID:-"unknown"}
     else
         print_color "$RED" "Cannot detect Linux distribution"
         exit 1
     fi
     
-    log_message "Detected distribution: $DISTRO_NAME ($DISTRO) $VERSION_ID"
+    log_message "Detected distribution: $DISTRO $VERSION_ID"
 }
 
 # Function to check dependencies
@@ -122,232 +121,39 @@ install_dependencies() {
     esac
 }
 
-# Function to detect LAN-based applications
-detect_lan_apps() {
-    local detected_apps=()
-    
-    # Check for KDE Connect
-    if command -v kdeconnect-cli &> /dev/null || systemctl --user is-active --quiet kdeconnectd 2>/dev/null || pgrep -x kdeconnectd &> /dev/null; then
-        detected_apps+=("kdeconnect:KDE Connect:1714:1716")
-    fi
-    
-    # Check for Zorin Connect (same as KDE Connect, but check for Zorin OS specifically)
-    if [[ "$DISTRO" == "zorin" ]] || [[ "$DISTRO_NAME" == *"Zorin"* ]]; then
-        if command -v zorin-connect &> /dev/null || command -v kdeconnect-cli &> /dev/null || systemctl --user is-active --quiet zorin-connect 2>/dev/null; then
-            detected_apps+=("zorinconnect:Zorin Connect:1714:1716")
-        fi
-    fi
-    
-    # Check for Steam Link
-    if command -v steam &> /dev/null || pgrep -x steam &> /dev/null || [ -d "$HOME/.steam" ] 2>/dev/null; then
-        detected_apps+=("steamlink:Steam Link:27036:27037:27031:47984:48010")
-    fi
-    
-    # Check for Plex Media Server
-    if systemctl is-active --quiet plexmediaserver 2>/dev/null || systemctl is-active --quiet plex 2>/dev/null; then
-        detected_apps+=("plex:Plex Media Server:32400")
-    fi
-    
-    # Check for Jellyfin
-    if systemctl is-active --quiet jellyfin 2>/dev/null; then
-        detected_apps+=("jellyfin:Jellyfin:8096")
-    fi
-    
-    # Check for DLNA/UPnP services (avahi-daemon)
-    if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
-        detected_apps+=("avahi:Network Discovery (avahi-daemon):5353")
-    fi
-    
-    echo "${detected_apps[@]}"
-}
-
-# Function to check if UFW has existing rules
-check_existing_ufw_rules() {
-    if command -v ufw &> /dev/null; then
-        local rule_count=$(sudo ufw status numbered 2>/dev/null | grep -c "^\[" || echo "0")
-        if [ "$rule_count" -gt 0 ]; then
-            return 0  # Has rules
-        fi
-    fi
-    return 1  # No rules or UFW not active
-}
-
-# Function to add firewall rules for a specific app
-add_app_firewall_rules() {
-    local app_id=$1
-    local app_name=$2
-    
-    print_color "$CYAN" "Adding firewall rules for $app_name..."
-    
-    case $app_id in
-        kdeconnect|zorinconnect)
-            # KDE Connect / Zorin Connect ports (1714-1716 TCP/UDP)
-            if ! sudo ufw status | grep -q "1714.*tcp"; then
-                sudo ufw allow 1714:1716/tcp comment "$app_name TCP"
-            fi
-            if ! sudo ufw status | grep -q "1714.*udp"; then
-                sudo ufw allow 1714:1716/udp comment "$app_name UDP"
-            fi
-            ;;
-        steamlink)
-            # Steam Link ports
-            if ! sudo ufw status | grep -q "27036.*udp"; then
-                sudo ufw allow 27036/udp comment "$app_name streaming"
-            fi
-            if ! sudo ufw status | grep -q "27037.*udp"; then
-                sudo ufw allow 27037/udp comment "$app_name streaming"
-            fi
-            if ! sudo ufw status | grep -q "27031.*udp"; then
-                sudo ufw allow 27031/udp comment "$app_name discovery"
-            fi
-            if ! sudo ufw status | grep -q "47984.*udp"; then
-                sudo ufw allow 47984:48010/udp comment "$app_name streaming range UDP"
-            fi
-            if ! sudo ufw status | grep -q "47984.*tcp"; then
-                sudo ufw allow 47984:48010/tcp comment "$app_name streaming range TCP"
-            fi
-            ;;
-        plex)
-            if ! sudo ufw status | grep -q "32400.*tcp"; then
-                sudo ufw allow 32400/tcp comment "$app_name"
-            fi
-            if ! sudo ufw status | grep -q "32400.*udp"; then
-                sudo ufw allow 32400/udp comment "$app_name"
-            fi
-            ;;
-        jellyfin)
-            if ! sudo ufw status | grep -q "8096.*tcp"; then
-                sudo ufw allow 8096/tcp comment "$app_name"
-            fi
-            ;;
-        avahi)
-            if ! sudo ufw status | grep -q "5353.*udp"; then
-                sudo ufw allow 5353/udp comment "$app_name (mDNS)"
-            fi
-            ;;
-    esac
-    
-    print_color "$GREEN" "✓ $app_name firewall rules added"
-    log_message "Added firewall rules for $app_name"
-}
-
 # Function to configure UFW firewall
 configure_firewall() {
     print_color "$PURPLE" "=== Configuring UFW Firewall ==="
     print_color "$CYAN" ""
-    
-    # Check for existing UFW rules
-    local has_existing_rules=false
-    if check_existing_ufw_rules; then
-        has_existing_rules=true
-        print_color "$YELLOW" "⚠ Existing UFW firewall rules detected"
-        print_color "$CYAN" ""
-        sudo ufw status numbered | head -10
-        print_color "$CYAN" ""
-        
-        if ! confirm_action "Do you want to keep existing firewall rules and add to them? (No = reset to defaults)"; then
-            has_existing_rules=false
-            print_color "$YELLOW" "Will reset firewall to defaults and apply new rules"
-        else
-            print_color "$GREEN" "Will keep existing rules and add new ones"
-        fi
-        print_color "$CYAN" ""
-    fi
-    
     print_color "$CYAN" "This will:"
-    if [ "$has_existing_rules" = false ]; then
-        print_color "$YELLOW" "  • Reset UFW firewall to defaults"
-    fi
+    print_color "$YELLOW" "  • Reset UFW firewall to defaults"
     print_color "$YELLOW" "  • Set default policy: DENY incoming, ALLOW outgoing"
     print_color "$YELLOW" "  • Allow SSH (port 22) for remote access"
     print_color "$YELLOW" "  • Allow outgoing DNS (53), HTTP (80), HTTPS (443), NTP (123)"
-    print_color "$YELLOW" "  • Detect and configure LAN-based applications"
     print_color "$YELLOW" "  • Enable firewall logging"
     print_color "$CYAN" ""
     print_color "$GREEN" "Note: Tailscale will continue to work as it uses its own network interface"
     print_color "$CYAN" ""
     
-    if ! confirm_action "Configure UFW firewall?"; then
+    if ! confirm_action "Configure UFW firewall with restrictive default rules?"; then
         return 0
     fi
     
     log_message "Configuring UFW firewall"
     
-    # Reset UFW only if user chose to reset
-    if [ "$has_existing_rules" = false ]; then
-        sudo ufw --force reset
-    fi
+    # Reset UFW to defaults
+    sudo ufw --force reset
     
-    # Set default policies (only if reset, or if UFW is inactive)
-    if ! sudo ufw status | grep -q "Status: active"; then
-        sudo ufw default deny incoming
-        sudo ufw default allow outgoing
-    fi
+    # Set default policies
+    sudo ufw default deny incoming
+    sudo ufw default allow outgoing
     
-    # Allow essential services (only add if not already present)
-    if ! sudo ufw status | grep -q "22/tcp"; then
-        sudo ufw allow ssh
-    fi
-    if ! sudo ufw status | grep -q "53.*out"; then
-        sudo ufw allow out 53  # DNS
-    fi
-    if ! sudo ufw status | grep -q "80.*out"; then
-        sudo ufw allow out 80  # HTTP
-    fi
-    if ! sudo ufw status | grep -q "443.*out"; then
-        sudo ufw allow out 443 # HTTPS
-    fi
-    if ! sudo ufw status | grep -q "123.*out"; then
-        sudo ufw allow out 123 # NTP
-    fi
-    
-    # Detect LAN-based applications
-    print_color "$CYAN" ""
-    print_color "$CYAN" "Detecting LAN-based applications..."
-    local detected_apps=($(detect_lan_apps))
-    
-    if [ ${#detected_apps[@]} -gt 0 ]; then
-        print_color "$GREEN" "✓ Detected ${#detected_apps[@]} LAN-based application(s):"
-        print_color "$CYAN" ""
-        
-        for app_info in "${detected_apps[@]}"; do
-            IFS=':' read -r app_id app_name rest <<< "$app_info"
-            print_color "$YELLOW" "  • $app_name"
-        done
-        print_color "$CYAN" ""
-        
-        # Prompt for each detected app
-        for app_info in "${detected_apps[@]}"; do
-            IFS=':' read -r app_id app_name rest <<< "$app_info"
-            if confirm_action "Allow $app_name through firewall? (required for LAN connectivity)"; then
-                add_app_firewall_rules "$app_id" "$app_name"
-            else
-                print_color "$YELLOW" "  ⏭ Skipping $app_name (may not work over LAN)"
-            fi
-        done
-    else
-        print_color "$CYAN" "No common LAN-based applications detected"
-        print_color "$CYAN" ""
-        
-        # Still ask about common apps even if not detected
-        if confirm_action "Do you use Steam Link for game streaming?"; then
-            add_app_firewall_rules "steamlink" "Steam Link"
-        fi
-        
-        # Check for Zorin OS and ask about Zorin Connect
-        if [[ "$DISTRO" == "zorin" ]] || [[ "$DISTRO_NAME" == *"Zorin"* ]]; then
-            if confirm_action "Do you use Zorin Connect for phone integration?"; then
-                add_app_firewall_rules "zorinconnect" "Zorin Connect"
-            fi
-        fi
-        
-        # Ask about KDE Connect (if not Zorin)
-        if [[ "$DISTRO" != "zorin" ]] && [[ "$DISTRO_NAME" != *"Zorin"* ]]; then
-            if confirm_action "Do you use KDE Connect for phone integration?"; then
-                add_app_firewall_rules "kdeconnect" "KDE Connect"
-            fi
-        fi
-    fi
+    # Allow essential services
+    sudo ufw allow ssh
+    sudo ufw allow out 53  # DNS
+    sudo ufw allow out 80  # HTTP
+    sudo ufw allow out 443 # HTTPS
+    sudo ufw allow out 123 # NTP
     
     # Enable UFW
     sudo ufw --force enable
@@ -356,9 +162,6 @@ configure_firewall() {
     sudo ufw logging on
     
     print_color "$GREEN" "✓ UFW firewall configured successfully"
-    print_color "$CYAN" ""
-    print_color "$CYAN" "Current firewall status:"
-    sudo ufw status numbered | head -15
 }
 
 # Function to configure DNS encryption
@@ -974,123 +777,6 @@ install_common_apps() {
     print_color "$CYAN" "Note: Some applications may require a system restart or logout/login to appear in menus"
 }
 
-# Function to install Bitwarden CLI from GitHub releases (for systems without snap)
-install_bitwarden_from_github() {
-    print_color "$CYAN" "  Downloading Bitwarden CLI from GitHub..."
-    
-    # Save current directory - CRITICAL: must restore in all code paths
-    local original_dir=$(pwd)
-    local temp_dir=""
-    
-    # Ensure unzip is installed
-    if ! command -v unzip &> /dev/null; then
-        print_color "$CYAN" "  Installing unzip..."
-        case $DISTRO in
-            ubuntu|debian)
-                sudo apt install -y unzip || return 1
-                ;;
-            fedora)
-                sudo dnf install -y unzip || return 1
-                ;;
-            arch|manjaro)
-                sudo pacman -S --noconfirm unzip || return 1
-                ;;
-        esac
-    fi
-    
-    # Detect architecture
-    ARCH=$(uname -m)
-    case "$ARCH" in
-        x86_64)
-            BW_ARCH="amd64"
-            ;;
-        aarch64|arm64)
-            BW_ARCH="arm64"
-            ;;
-        armv7l|armhf)
-            BW_ARCH="armv7"
-            ;;
-        *)
-            print_color "$RED" "  ✗ Unsupported architecture: $ARCH"
-            print_color "$CYAN" "  Install Bitwarden CLI manually from: https://github.com/bitwarden/cli/releases"
-            return 1
-            ;;
-    esac
-    
-    # Get latest version and construct URL (one curl call)
-    # Bug 1 Fix: Disable pipefail temporarily for this pipeline to prevent exit on failure
-    # With set -o pipefail, any command failure in pipeline would exit script
-    # This ensures graceful error handling even if curl, grep, or sed fail
-    set +o pipefail
-    BW_VERSION=$(curl -s https://api.github.com/repos/bitwarden/cli/releases/latest 2>/dev/null | grep '"tag_name":' 2>/dev/null | sed -E 's/.*"([^"]+)".*//' 2>/dev/null | sed 's/v//' 2>/dev/null || echo "")
-    set -o pipefail
-    BW_URL="https://github.com/bitwarden/cli/releases/download/v${BW_VERSION}/bw-linux-${BW_ARCH}-${BW_VERSION}.zip"
-    
-    if [ -z "$BW_VERSION" ]; then
-        print_color "$YELLOW" "  ⏭ Could not determine latest version, skipping"
-        print_color "$CYAN" "  Install manually: https://github.com/bitwarden/cli/releases"
-        return 1
-    fi
-    
-    # Create temp directory
-    temp_dir=$(mktemp -d) || {
-        print_color "$RED" "  ✗ Failed to create temp directory"
-        return 1
-    }
-    
-    # Ensure cleanup happens even on failure - trap will restore directory and cleanup
-    trap "cd '$original_dir' 2>/dev/null || true; rm -rf '$temp_dir' 2>/dev/null || true" EXIT
-    
-    # Change to temp directory
-    if ! cd "$temp_dir" 2>/dev/null; then
-        print_color "$RED" "  ✗ Failed to change to temp directory"
-        rm -rf "$temp_dir" 2>/dev/null || true
-        trap - EXIT
-        return 1
-    fi
-    
-    # Download, extract, and install with proper error handling
-    if curl -fsSL "$BW_URL" -o bw.zip 2>/dev/null && unzip -q bw.zip 2>/dev/null && [ -f bw ]; then
-        # Bug 2 Fix: Wrap sudo commands in conditional with error handling
-        # This ensures directory restoration and cleanup even if sudo commands fail
-        # With set -e, failure would exit script without cleanup
-        if (sudo mv bw /usr/local/bin/bw 2>/dev/null && sudo chmod +x /usr/local/bin/bw 2>/dev/null); then
-            cd "$original_dir" || true
-            trap - EXIT  # Remove trap before cleanup
-            rm -rf "$temp_dir" 2>/dev/null || true
-            print_color "$GREEN" "  ✓ Bitwarden CLI installed from GitHub (v${BW_VERSION})"
-            log_message "Installed: Bitwarden CLI (GitHub v${BW_VERSION})"
-            return 0
-        else
-            print_color "$RED" "  ✗ Failed to install Bitwarden CLI binary (permission issue?)"
-            cd "$original_dir" || true
-            trap - EXIT
-            rm -rf "$temp_dir" 2>/dev/null || true
-            return 1
-        fi
-    else
-        print_color "$RED" "  ✗ Failed to download or extract Bitwarden CLI"
-        cd "$original_dir" || true
-        trap - EXIT
-        rm -rf "$temp_dir" 2>/dev/null || true
-        return 1
-    fi
-}
-
-# Function to cleanup temporary files
-cleanup_temp_files() {
-    print_color "$CYAN" "Cleaning up temporary files..."
-    # Clean up any temp files created during script execution
-    # Remove old log files (older than 7 days)
-    find /tmp -maxdepth 1 -name "privacy_toolkit_*.log" -type f -mtime +7 -delete 2>/dev/null || true
-    # Remove any leftover temp files from this script run
-    rm -f /tmp/browser-common.local /tmp/99-privacy-hardening.conf 2>/dev/null || true
-    # Clean up any other temp files owned by user
-    find /tmp -maxdepth 1 -name "*.tmp" -user "$USER" -type f -delete 2>/dev/null || true
-    print_color "$GREEN" "✓ Cleanup complete"
-}
-
-# Function to install additional security tools
 # Function to install additional security tools
 install_security_tools() {
     print_color "$PURPLE" "=== Additional Security Tools ==="
@@ -1112,26 +798,7 @@ install_security_tools() {
     case $DISTRO in
         ubuntu|debian)
             sudo apt update
-            sudo apt install -y fail2ban rkhunter secure-delete tor
-            # Bitwarden CLI installation (try snap first, then GitHub binary)
-            # Use || true to prevent script exit on failure (set -e is enabled)
-            if ! command -v bw &> /dev/null; then
-                if command -v snap &> /dev/null; then
-                    print_color "$CYAN" "  Installing Bitwarden CLI via snap..."
-                    if sudo snap install bw 2>/dev/null; then
-                        print_color "$GREEN" "  ✓ Bitwarden CLI installed via snap"
-                        log_message "Installed: Bitwarden CLI (snap)"
-                    else
-                        print_color "$YELLOW" "  ⏭ Snap installation failed, trying GitHub binary..."
-                        install_bitwarden_from_github || true
-                    fi
-                else
-                    print_color "$YELLOW" "  ⏭ Snap not available (common on Linux Mint/Zorin), using GitHub binary..."
-                    install_bitwarden_from_github || true
-                fi
-            else
-                print_color "$YELLOW" "  ⏭ Bitwarden CLI already installed, skipping"
-            fi
+            sudo apt install -y fail2ban rkhunter secure-delete tor bitwarden-cli
             ;;
         fedora)
             sudo dnf install -y fail2ban rkhunter secure-delete tor
