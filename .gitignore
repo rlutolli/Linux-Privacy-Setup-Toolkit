@@ -21,3 +21,10 @@ Thumbs.db
 test-results/
 *.log
 
+# Personal/sensitive files
+*.pdf
+*.rar
+*.zip
+fix-steam-link.sh
+clean-git-history.sh
+
