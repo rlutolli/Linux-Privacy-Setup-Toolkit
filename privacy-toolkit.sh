@@ -65,13 +65,14 @@ detect_distro() {
     if [ -f /etc/os-release ]; then
         . /etc/os-release
         DISTRO=$ID
+        DISTRO_NAME=${NAME:-$ID}
         VERSION_ID=${VERSION_ID:-"unknown"}
     else
         print_color "$RED" "Cannot detect Linux distribution"
         exit 1
     fi
     
-    log_message "Detected distribution: $DISTRO $VERSION_ID"
+    log_message "Detected distribution: $DISTRO_NAME ($DISTRO) $VERSION_ID"
 }
 
 # Function to check dependencies
@@ -121,39 +122,245 @@ install_dependencies() {
     esac
 }
 
+# Function to detect LAN-based applications
+# Bug 2 Fix: Use null-delimited output to prevent word-splitting issues
+detect_lan_apps() {
+    local detected_apps=()
+    
+    # Check for KDE Connect
+    if command -v kdeconnect-cli &> /dev/null || systemctl --user is-active --quiet kdeconnectd 2>/dev/null || pgrep -x kdeconnectd &> /dev/null; then
+        detected_apps+=("kdeconnect:KDE Connect:1714:1716")
+    fi
+    
+    # Check for Zorin Connect (same as KDE Connect, but check for Zorin OS specifically)
+    if [[ "$DISTRO" == "zorin" ]] || [[ "$DISTRO_NAME" == *"Zorin"* ]]; then
+        if command -v zorin-connect &> /dev/null || command -v kdeconnect-cli &> /dev/null || systemctl --user is-active --quiet zorin-connect 2>/dev/null; then
+            detected_apps+=("zorinconnect:Zorin Connect:1714:1716")
+        fi
+    fi
+    
+    # Check for Steam Link
+    if command -v steam &> /dev/null || pgrep -x steam &> /dev/null || [ -d "$HOME/.steam" ] 2>/dev/null; then
+        detected_apps+=("steamlink:Steam Link:27036:27037:27031:47984:48010")
+    fi
+    
+    # Check for Plex Media Server
+    if systemctl is-active --quiet plexmediaserver 2>/dev/null || systemctl is-active --quiet plex 2>/dev/null; then
+        detected_apps+=("plex:Plex Media Server:32400")
+    fi
+    
+    # Check for Jellyfin
+    if systemctl is-active --quiet jellyfin 2>/dev/null; then
+        detected_apps+=("jellyfin:Jellyfin:8096")
+    fi
+    
+    # Check for DLNA/UPnP services (avahi-daemon)
+    if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
+        detected_apps+=("avahi:Network Discovery (avahi-daemon):5353")
+    fi
+    
+    # Bug 2 Fix: Use printf with null delimiter to prevent word-splitting
+    # This ensures entries with spaces (like "KDE Connect") remain intact
+    printf '%s\0' "${detected_apps[@]}"
+}
+
+# Function to check if UFW has existing rules
+check_existing_ufw_rules() {
+    if command -v ufw &> /dev/null; then
+        local rule_count=$(sudo ufw status numbered 2>/dev/null | grep -c "^\[" || echo "0")
+        if [ "$rule_count" -gt 0 ]; then
+            return 0  # Has rules
+        fi
+    fi
+    return 1  # No rules or UFW not active
+}
+
+# Function to add firewall rules for a specific app
+add_app_firewall_rules() {
+    local app_id=$1
+    local app_name=$2
+    
+    print_color "$CYAN" "Adding firewall rules for $app_name..."
+    
+    case $app_id in
+        kdeconnect|zorinconnect)
+            # KDE Connect / Zorin Connect ports (1714-1716 TCP/UDP)
+            # Bug 1 Fix: Use case-insensitive grep to match both "out" and "OUT"
+            if ! sudo ufw status | grep -qiE "1714.*tcp|tcp.*1714"; then
+                sudo ufw allow 1714:1716/tcp comment "$app_name TCP"
+            fi
+            if ! sudo ufw status | grep -qiE "1714.*udp|udp.*1714"; then
+                sudo ufw allow 1714:1716/udp comment "$app_name UDP"
+            fi
+            ;;
+        steamlink)
+            # Steam Link ports
+            # Bug 1 Fix: Use case-insensitive grep
+            if ! sudo ufw status | grep -qiE "27036.*udp|udp.*27036"; then
+                sudo ufw allow 27036/udp comment "$app_name streaming"
+            fi
+            if ! sudo ufw status | grep -qiE "27037.*udp|udp.*27037"; then
+                sudo ufw allow 27037/udp comment "$app_name streaming"
+            fi
+            if ! sudo ufw status | grep -qiE "27031.*udp|udp.*27031"; then
+                sudo ufw allow 27031/udp comment "$app_name discovery"
+            fi
+            if ! sudo ufw status | grep -qiE "47984.*udp|udp.*47984"; then
+                sudo ufw allow 47984:48010/udp comment "$app_name streaming range UDP"
+            fi
+            if ! sudo ufw status | grep -qiE "47984.*tcp|tcp.*47984"; then
+                sudo ufw allow 47984:48010/tcp comment "$app_name streaming range TCP"
+            fi
+            ;;
+        plex)
+            # Bug 1 Fix: Use case-insensitive grep
+            if ! sudo ufw status | grep -qiE "32400.*tcp|tcp.*32400"; then
+                sudo ufw allow 32400/tcp comment "$app_name"
+            fi
+            if ! sudo ufw status | grep -qiE "32400.*udp|udp.*32400"; then
+                sudo ufw allow 32400/udp comment "$app_name"
+            fi
+            ;;
+        jellyfin)
+            # Bug 1 Fix: Use case-insensitive grep
+            if ! sudo ufw status | grep -qiE "8096.*tcp|tcp.*8096"; then
+                sudo ufw allow 8096/tcp comment "$app_name"
+            fi
+            ;;
+        avahi)
+            # Bug 1 Fix: Use case-insensitive grep
+            if ! sudo ufw status | grep -qiE "5353.*udp|udp.*5353"; then
+                sudo ufw allow 5353/udp comment "$app_name (mDNS)"
+            fi
+            ;;
+    esac
+    
+    print_color "$GREEN" "✓ $app_name firewall rules added"
+    log_message "Added firewall rules for $app_name"
+}
+
 # Function to configure UFW firewall
 configure_firewall() {
     print_color "$PURPLE" "=== Configuring UFW Firewall ==="
     print_color "$CYAN" ""
+    
+    # Check for existing UFW rules
+    local has_existing_rules=false
+    if check_existing_ufw_rules; then
+        has_existing_rules=true
+        print_color "$YELLOW" "⚠ Existing UFW firewall rules detected"
+        print_color "$CYAN" ""
+        sudo ufw status numbered | head -10
+        print_color "$CYAN" ""
+        
+        if ! confirm_action "Do you want to keep existing firewall rules and add to them? (No = reset to defaults)"; then
+            has_existing_rules=false
+            print_color "$YELLOW" "Will reset firewall to defaults and apply new rules"
+        else
+            print_color "$GREEN" "Will keep existing rules and add new ones"
+        fi
+        print_color "$CYAN" ""
+    fi
+    
     print_color "$CYAN" "This will:"
-    print_color "$YELLOW" "  • Reset UFW firewall to defaults"
+    if [ "$has_existing_rules" = false ]; then
+        print_color "$YELLOW" "  • Reset UFW firewall to defaults"
+    fi
     print_color "$YELLOW" "  • Set default policy: DENY incoming, ALLOW outgoing"
     print_color "$YELLOW" "  • Allow SSH (port 22) for remote access"
     print_color "$YELLOW" "  • Allow outgoing DNS (53), HTTP (80), HTTPS (443), NTP (123)"
+    print_color "$YELLOW" "  • Detect and configure LAN-based applications"
     print_color "$YELLOW" "  • Enable firewall logging"
     print_color "$CYAN" ""
     print_color "$GREEN" "Note: Tailscale will continue to work as it uses its own network interface"
     print_color "$CYAN" ""
     
-    if ! confirm_action "Configure UFW firewall with restrictive default rules?"; then
+    if ! confirm_action "Configure UFW firewall?"; then
         return 0
     fi
     
     log_message "Configuring UFW firewall"
     
-    # Reset UFW to defaults
-    sudo ufw --force reset
+    # Reset UFW only if user chose to reset
+    if [ "$has_existing_rules" = false ]; then
+        sudo ufw --force reset
+    fi
     
-    # Set default policies
-    sudo ufw default deny incoming
-    sudo ufw default allow outgoing
+    # Set default policies (only if reset, or if UFW is inactive)
+    if ! sudo ufw status | grep -q "Status: active"; then
+        sudo ufw default deny incoming
+        sudo ufw default allow outgoing
+    fi
     
-    # Allow essential services
-    sudo ufw allow ssh
-    sudo ufw allow out 53  # DNS
-    sudo ufw allow out 80  # HTTP
-    sudo ufw allow out 443 # HTTPS
-    sudo ufw allow out 123 # NTP
+    # Allow essential services (only add if not already present)
+    # Bug 1 Fix: Use case-insensitive grep to match both "out" and "OUT" in UFW status output
+    if ! sudo ufw status | grep -qiE "22.*tcp|tcp.*22|ssh"; then
+        sudo ufw allow ssh
+    fi
+    if ! sudo ufw status | grep -qiE "53.*out|OUT.*53"; then
+        sudo ufw allow out 53  # DNS
+    fi
+    if ! sudo ufw status | grep -qiE "80.*out|OUT.*80"; then
+        sudo ufw allow out 80  # HTTP
+    fi
+    if ! sudo ufw status | grep -qiE "443.*out|OUT.*443"; then
+        sudo ufw allow out 443 # HTTPS
+    fi
+    if ! sudo ufw status | grep -qiE "123.*out|OUT.*123"; then
+        sudo ufw allow out 123 # NTP
+    fi
+    
+    # Detect LAN-based applications
+    print_color "$CYAN" ""
+    print_color "$CYAN" "Detecting LAN-based applications..."
+    # Bug 2 Fix: Use read with null-delimited input to prevent word-splitting
+    local detected_apps=()
+    while IFS= read -r -d '' app_info; do
+        detected_apps+=("$app_info")
+    done < <(detect_lan_apps)
+    
+    if [ ${#detected_apps[@]} -gt 0 ]; then
+        print_color "$GREEN" "✓ Detected ${#detected_apps[@]} LAN-based application(s):"
+        print_color "$CYAN" ""
+        
+        for app_info in "${detected_apps[@]}"; do
+            IFS=':' read -r app_id app_name rest <<< "$app_info"
+            print_color "$YELLOW" "  • $app_name"
+        done
+        print_color "$CYAN" ""
+        
+        # Prompt for each detected app
+        for app_info in "${detected_apps[@]}"; do
+            IFS=':' read -r app_id app_name rest <<< "$app_info"
+            if confirm_action "Allow $app_name through firewall? (required for LAN connectivity)"; then
+                add_app_firewall_rules "$app_id" "$app_name"
+            else
+                print_color "$YELLOW" "  ⏭ Skipping $app_name (may not work over LAN)"
+            fi
+        done
+    else
+        print_color "$CYAN" "No common LAN-based applications detected"
+        print_color "$CYAN" ""
+        
+        # Still ask about common apps even if not detected
+        if confirm_action "Do you use Steam Link for game streaming?"; then
+            add_app_firewall_rules "steamlink" "Steam Link"
+        fi
+        
+        # Check for Zorin OS and ask about Zorin Connect
+        if [[ "$DISTRO" == "zorin" ]] || [[ "$DISTRO_NAME" == *"Zorin"* ]]; then
+            if confirm_action "Do you use Zorin Connect for phone integration?"; then
+                add_app_firewall_rules "zorinconnect" "Zorin Connect"
+            fi
+        fi
+        
+        # Ask about KDE Connect (if not Zorin)
+        if [[ "$DISTRO" != "zorin" ]] && [[ "$DISTRO_NAME" != *"Zorin"* ]]; then
+            if confirm_action "Do you use KDE Connect for phone integration?"; then
+                add_app_firewall_rules "kdeconnect" "KDE Connect"
+            fi
+        fi
+    fi
     
     # Enable UFW
     sudo ufw --force enable
@@ -162,6 +369,9 @@ configure_firewall() {
     sudo ufw logging on
     
     print_color "$GREEN" "✓ UFW firewall configured successfully"
+    print_color "$CYAN" ""
+    print_color "$CYAN" "Current firewall status:"
+    sudo ufw status numbered | head -15
 }
 
 # Function to configure DNS encryption
